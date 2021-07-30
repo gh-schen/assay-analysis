@@ -21,7 +21,7 @@ class regData():
         self.maf_key_ = y_key
         #self.intercept_key_ = "intercept"
         self.min_total_pos_ctrl_ = 500 # 
-        self.follow_iter_ = 0 # number of iterations for training data points with no MAF
+        self.follow_iter_ = 4 # number of iterations for training data points with no MAF
         self.min_spec_ = 0.2 # do not try roc after min_spec
         self.num_best_features_ = 2000 # top features used for MAF prediction
         self.roc_intervals = 50
