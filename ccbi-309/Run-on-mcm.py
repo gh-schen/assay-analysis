@@ -15,8 +15,8 @@ def main():
 
     feature_path = "data/methylome_cohort_CV_scores.2020-06-21.tsv"
     #region_bed_path = "data/mcm_clean_regions.bed"
-    #count_path = "data/v6.mol_counts.summary.tsv"
-    count_path = "data/mcm_mcm_param.mol_counts.summary.tsv"
+    count_path = "data/v6.mol_counts.summary.tsv"
+    #count_path = "data/mcm_mcm_param.mol_counts.summary.tsv"
 
     cv_seed = 0 # CV shuffle seed
     cancer_type = "crc"

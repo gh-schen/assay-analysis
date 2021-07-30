@@ -31,6 +31,7 @@ class regData():
         self.init_train_y = []
         self.test_x = []
         self.test_y = []
+        self.follow_test_x = []
         # model
         self.feature_regions = []
         self.regressor_ = regressor
@@ -59,7 +60,7 @@ class regData():
             x_test = new_x.iloc[test_locs]
             y_train = new_y.iloc[train_locs]
             y_test = new_y.iloc[test_locs]
-            if maf_exist:
+            if maf_exist: # initial train/test
                 if len(self.init_train_x) <= pindex: # this partition has no data yest
                     self.init_train_x.append(x_train)
                     self.init_train_y.append(y_train)
@@ -70,8 +71,9 @@ class regData():
                     self.init_train_y[pindex] = self.init_train_y[pindex].append(y_train)
                     self.test_x[pindex] = self.test_x[pindex].append(x_test)
                     self.test_y[pindex] = self.test_y[pindex].append(y_test)
-            else:
+            else: # no maf info -> add to follows
                 self.follow_train_x.append(x_train)
+                self.follow_test_x.append(x_test)
             pindex += 1
             pstart = pstop
 
@@ -115,19 +117,31 @@ class regData():
             self.feature_regions.append(fr)
 
         # set up samples
-        total_test = 0
         for ii in range(self.num_cv_):
             tlist = self.test_x[ii].index
-            total_test += len(tlist)
             for j in range(tlist.shape[0]):
                 po = predOutcome()
                 po.true_y = self.test_y[ii][j]
+                self.pred_map[tlist[j]] = po
+            tlist = self.follow_test_x[ii].index
+            for j in range(tlist.shape[0]):
+                po = predOutcome()
+                po.true_y = None
                 self.pred_map[tlist[j]] = po
 
         for s in init_cancer.index:
             self.pred_map[s].cancer_status = 1
         for s in init_normal.index:
             self.pred_map[s].cancer_status = 0
+        for dname, dinfo in follows.iterrows():
+            ct = dinfo["cancer_type"]
+            if ct == self.cancer_type_str_:
+                cstatus = 1
+            elif ct == self.cancer_free_str_:
+                cstatus = 0
+            else:
+                continue
+            self.pred_map[dname].cancer_status = cstatus
 
 
     def run_cv_maf_predict(self):
@@ -136,6 +150,7 @@ class regData():
             fr = self.feature_regions[ii]
             srm.train(self.init_train_x[ii][fr], self.follow_train_x[ii][fr], self.init_train_y[ii], self.follow_iter_)
 
+            """
             foo = srm.mmodel.outliers_
             nt = 0
             nf = 0
@@ -145,14 +160,27 @@ class regData():
                 else:
                     nf += 1
             print([nt, nf])
-
+            """
+            # init training
             train_y = srm.predict(self.init_train_x[ii][fr])
             tlist = self.init_train_x[ii].index
             for j in range(len(tlist)):
                 self.pred_map[tlist[j]].train_ys.append(train_y[j])
 
+            # init test
             test_y = srm.predict(self.test_x[ii][fr])
             tlist = self.test_x[ii].index
+            for j in range(len(tlist)):
+                self.pred_map[tlist[j]].test_y = test_y[j]
+
+            # follow up train & test
+            train_y = srm.predict(self.follow_train_x[ii][fr])
+            tlist = self.follow_train_x[ii].index
+            for j in range(len(tlist)):
+                self.pred_map[tlist[j]].train_ys.append(train_y[j])
+
+            test_y = srm.predict(self.follow_test_x[ii][fr])
+            tlist = self.follow_test_x[ii].index
             for j in range(len(tlist)):
                 self.pred_map[tlist[j]].test_y = test_y[j]
 
@@ -167,6 +195,8 @@ class regData():
         cancer_stats = []
 
         for k,v in self.pred_map.items():
+            if v.cancer_status is None:
+                continue
             samples.append(k)
             train_ys.append(median(v.train_ys))
             test_ys.append(v.test_y)
@@ -179,6 +209,8 @@ class regData():
         d_tumor = d_all[d_all.status==1]
         total_pos = d_tumor.shape[0]
         total_neg = d_normal.shape[0]
+
+        print([total_neg, total_pos])
 
         normal_values = list(set(d_normal["train"].to_list()))
         normal_values.sort(reverse=True)
