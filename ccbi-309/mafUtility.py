@@ -12,6 +12,8 @@ class singleRegModel():
     def __init__(self, regressor):
         self.regressor = regressor
         self.mmodel = None
+        # params
+        self.quantile_limit_ = 0.95
 
 
     def train(self, init_x, follow_x, init_y, follow_iter):
@@ -20,7 +22,7 @@ class singleRegModel():
 
         for i in range(follow_iter):
             init_preds = self.mmodel.predict(init_x)
-            upper_limit = quantile(init_preds)
+            upper_limit = quantile(init_preds, self.quantile_limit_)
             follow_y = self.mmodel.predict(follow_x)
             follow_y[follow_y > upper_limit] = upper_limit
 
