@@ -12,5 +12,6 @@ class configData():
         self.output_prefix = injson["output_prefix"]
 
         # parameters
-        self.total_cv = injson["total_cv"]
-        self.cv_start_seed = injson["cv_start_seed"]
+        self.total_iterations = injson["total_iterations"]
+        self.iteration_start_seed = injson["iteration_start_seed"]
+        

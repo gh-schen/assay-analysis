@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
 import logging
+from statistics import median, mean
 from sys import argv
-from pandas import read_csv, merge
+from pandas import read_csv, merge, DataFrame
 from numpy import nan
+from pandas._config import config
+from pandas.core.frame import DataFrame
 from MafCrcModel import regData
 from configData import configData
 
@@ -27,17 +30,31 @@ def main():
     logging.info("Loaded %d %s/normal data in %d regions.", mcm_data.shape[0], cancer_type, len(raw_regions))
 
     logging.info("Start CV.")
-    for cv_idx in range(config_data.total_cv):
+    roc_map = {}
+    r2s = []
+    residuals = []
+    classified_cancers = []
+    for cv_idx in range(config_data.total_iterations):
         reg_data = regData()
 
-        cv_seed = config_data.cv_start_seed + cv_idx
+        cv_seed = config_data.iteration_start_seed + cv_idx
         reg_data.set_cv_data(mcm_data, raw_regions, cv_seed)
         logging.info("Set %d fold CV data with %d in each partition.", reg_data.num_cv_, reg_data.test_x[0].shape[0])
 
         reg_data.run_cv_maf_predict()
         logging.info("Finished set up model with %d follow up iteration.", reg_data.follow_iter_)
     
-        roc_result = reg_data.get_roc()
+        set_roc(roc_map, reg_data.get_roc(), num_digits=3)
+        print(reg_data.get_roc())
+        #r2, rsd, num_pos = reg_data.get_r2_res_count()
+        #r2s.append(r2)
+        #residuals.append(rsd)
+        #classified_cancers.append(num_pos)
+    #r2_result = DataFrame(data={"r2": r2s, "residuals": residuals, "num_positive": classified_cancers})
+
+    roc_result = convert_roc_map_to_dataframe(roc_map, 4)
+    roc_result.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
+    #r2_result.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=False)
 
 
 def read_features(feature_path):
@@ -82,6 +99,27 @@ def load_molcounts_data(fname, features, cancer_name):
     int_cols = region_list + ["ctrl_sum"]
     crc_data[int_cols] = crc_data[int_cols].astype('int')
     return crc_data, region_list
+
+
+def set_roc(roc_map, reg_roc, num_digits):
+    # add ROC result from one single run
+    for idx, dt in reg_roc.iterrows():
+        dkey = round(dt["specificity"], num_digits)
+        sensi = dt["sensitivity"]
+        if dkey not in roc_map:
+            roc_map[dkey] = []
+        roc_map[dkey].append(sensi)
+
+
+def convert_roc_map_to_dataframe(roc_map, num_digits):
+    specs_sorted = sorted(list(roc_map.keys()), reverse=True)
+    roc_result = DataFrame(data={"specificity": [], "min": [], "max": [], "mean": [], "median": [], "num_points": []})
+    for spec in specs_sorted:
+        sensis = roc_map[spec]
+        ds = [spec, min(sensis), max(sensis), mean(sensis), median(sensis), len(sensis)]
+        ds[:-1] = [round(x, num_digits) for x in ds[:-1]]
+        roc_result.loc[roc_result.shape[0]] = ds
+    return roc_result
 
 
 if __name__ == "__main__":
