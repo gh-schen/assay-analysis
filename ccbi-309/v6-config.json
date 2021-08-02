@@ -1,0 +1,7 @@
+{
+    "feature_path": "data/methylome_cohort_CV_scores.2020-06-21.tsv",
+    "count_path": "data/v6.mol_counts.summary.tsv",
+    "output_prefix": "test/v6-test",
+    "total_cv": 10,
+    "cv_start_seed": 0
+}

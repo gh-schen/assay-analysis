@@ -210,8 +210,6 @@ class regData():
         total_pos = d_tumor.shape[0]
         total_neg = d_normal.shape[0]
 
-        print([total_neg, total_pos])
-
         normal_values = list(set(d_normal["train"].to_list()))
         normal_values.sort(reverse=True)
 
