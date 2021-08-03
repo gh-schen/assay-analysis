@@ -31,9 +31,7 @@ def main():
 
     logging.info("Start CV.")
     roc_map = {}
-    r2s = []
-    residuals = []
-    classified_cancers = []
+    r2_result = DataFrame(data={"r2": [], "mean_residual": [], "median_residual": [], "num_positive": [], "logit_cutoff": []})
     for cv_idx in range(config_data.total_iterations):
         reg_data = regData()
 
@@ -45,16 +43,13 @@ def main():
         logging.info("Finished set up model with %d follow up iteration.", reg_data.follow_iter_)
     
         set_roc(roc_map, reg_data.get_roc(), num_digits=3)
-        print(reg_data.get_roc())
-        #r2, rsd, num_pos = reg_data.get_r2_res_count()
-        #r2s.append(r2)
-        #residuals.append(rsd)
-        #classified_cancers.append(num_pos)
-    #r2_result = DataFrame(data={"r2": r2s, "residuals": residuals, "num_positive": classified_cancers})
+    
+        r2, residuals, num_pos, logit_cutoff = reg_data.get_r2_res_count(0.95)
+        r2_result.loc[r2_result.shape[0]] = [r2, mean(residuals), median(residuals), num_pos, logit_cutoff]
 
     roc_result = convert_roc_map_to_dataframe(roc_map, 4)
     roc_result.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
-    #r2_result.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=False)
+    r2_result.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=False)
 
 
 def read_features(feature_path):
