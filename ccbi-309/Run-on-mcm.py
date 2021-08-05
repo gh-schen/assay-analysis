@@ -4,7 +4,7 @@ import logging
 from statistics import median, mean
 from sys import argv
 from pandas import read_csv, merge, DataFrame
-from numpy import nan
+from numpy import nan, int32
 from pandas._config import config
 from pandas.core.frame import DataFrame
 from MafCrcModel import regData
@@ -91,8 +91,8 @@ def load_molcounts_data(fname, features, cancer_name):
     extra_keys.append("ctrl_sum")
     
     crc_data =  mdata[mdata.cancer_type.isin(["crc", "cancer_free"])][region_list + extra_keys]
-    int_cols = region_list + ["ctrl_sum"]
-    crc_data[int_cols] = crc_data[int_cols].astype('int')
+    #int_cols = region_list + ["ctrl_sum"]
+    #crc_data[int_cols] = crc_data[int_cols].astype(int32)
     return crc_data, region_list
 
 

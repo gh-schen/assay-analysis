@@ -46,7 +46,7 @@ class regData():
             raise Exception("Cannot do %d fold CV with %d length of data." % (num_partitions, rawdata.shape[0]))
 
         new_x = (rawdata[regions] + self.x_offset_).div(rawdata[self.ctrl_key_].values, axis=0)
-        new_x = log(new_x)
+        new_x = log(new_x.astype('float'))
         #new_x[self.intercept_key_] = 1
         new_y = logit(rawdata[self.maf_key_].fillna(self.min_maf_))
 
@@ -99,7 +99,7 @@ class regData():
         if self.ctrl_key_ not in count_data.columns:
             raise Exception("Need to have the control key %s" % self.ctrl_key_)
 
-        indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_].sample(frac=1)
+        indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_].sample(frac=1, random_state=seed_value)
 
         # then set training
         init_cancer_index = (indata["cancer_type"] == self.cancer_type_str_) & (indata["somatic_call"] == 1)
