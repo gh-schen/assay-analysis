@@ -3,9 +3,9 @@
 import logging
 from statistics import median, mean
 from sys import argv
+from typing import final
 from pandas import read_csv, merge, DataFrame
 from numpy import nan
-from pandas._config import config
 from pandas.core.frame import DataFrame
 from MafCrcModel import regData
 from configData import configData
@@ -20,8 +20,6 @@ def main():
 
     config_path = argv[1]
     config_data = configData(config_path)
-
-    cv_seed = 0 # CV shuffle seed
     cancer_type = "crc"
 
     features = read_features(config_data.feature_path)
@@ -31,26 +29,35 @@ def main():
 
     logging.info("Start CV.")
     roc_map = {}
+    final_r2 = None
     for cv_idx in range(config_data.total_iterations):
-        reg_data = regData()
-
         cv_seed = config_data.iteration_start_seed + cv_idx
-        reg_data.set_cv_data(mcm_data, raw_regions, cv_seed)
-        logging.info("Set %d fold CV data with %d in each partition.", reg_data.num_cv_, reg_data.test_x[0].shape[0])
-
-        reg_data.run_cv_maf_predict()
-        logging.info("Finished set up model with %d follow up iteration.", reg_data.follow_iter_)
-    
-        set_roc(roc_map, reg_data.get_roc(), num_digits=3)
-        r2_result = reg_data.get_r2_stats_dataframe(0.95)
-
+        r2_result, roc_result, pred_dataframe = run_single_iteration(config_data, mcm_data, raw_regions, cv_seed)
+        set_roc(roc_map, roc_result, num_digits=3)
         if cv_idx == 0: # only print pred for first iteration
-            pred_dataframe = reg_data.get_per_sample_logit_mafs()
+            final_r2 = r2_result
             pred_dataframe.to_csv(config_data.output_prefix + ".seed" + str(cv_seed) + ".pred.tsv", sep='\t', index=False)
+        else:
+            final_r2 = final_r2.append(r2_result)
 
-    roc_result = convert_roc_map_to_dataframe(roc_map, 4)
-    roc_result.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
-    r2_result.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
+    final_roc = convert_roc_map_to_dataframe(roc_map, 4)
+    final_roc.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
+    final_r2.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
+
+
+def run_single_iteration(mcm_data, raw_regions, cv_seed):
+    reg_data = regData()
+    reg_data.set_cv_data(mcm_data, raw_regions, cv_seed)
+    logging.info("Set %d fold CV data with %d in each partition.", reg_data.num_cv_, reg_data.test_x[0].shape[0])
+
+    reg_data.run_cv_maf_predict()
+    logging.info("Finished set up model with %d follow up iteration.", reg_data.follow_iter_)
+    
+    roc_result = reg_data.get_roc()
+    r2_result = reg_data.get_r2_stats_dataframe(0.95)
+    pred_dataframe = reg_data.get_per_sample_logit_mafs()
+    return r2_result, roc_result, pred_dataframe
+
 
 
 def read_features(feature_path):
@@ -91,7 +98,7 @@ def load_molcounts_data(fname, features, cancer_name):
     extra_keys = extra_keys[:-1]
     extra_keys.append("ctrl_sum")
     
-    crc_data =  mdata[mdata.cancer_type.isin(["crc", "cancer_free"])][region_list + extra_keys]
+    crc_data =  mdata[mdata.cancer_type.isin([cancer_name, "cancer_free"])][region_list + extra_keys]
     return crc_data, region_list
 
 
