@@ -4,7 +4,7 @@ import logging
 from statistics import median, mean
 from sys import argv
 from pandas import read_csv, merge, DataFrame
-from numpy import nan, int32
+from numpy import nan
 from pandas._config import config
 from pandas.core.frame import DataFrame
 from MafCrcModel import regData
@@ -31,7 +31,6 @@ def main():
 
     logging.info("Start CV.")
     roc_map = {}
-    r2_result = DataFrame(data={"r2": [], "mean_residual": [], "median_residual": [], "num_positive": [], "logit_cutoff": []})
     for cv_idx in range(config_data.total_iterations):
         reg_data = regData()
 
@@ -43,13 +42,15 @@ def main():
         logging.info("Finished set up model with %d follow up iteration.", reg_data.follow_iter_)
     
         set_roc(roc_map, reg_data.get_roc(), num_digits=3)
-    
-        r2, residuals, num_pos, logit_cutoff = reg_data.get_r2_res_count(0.95)
-        r2_result.loc[r2_result.shape[0]] = [r2, mean(residuals), median(residuals), num_pos, logit_cutoff]
+        r2_result = reg_data.get_r2_stats_dataframe(0.95)
+
+        if cv_idx == 0: # only print pred for first iteration
+            pred_dataframe = reg_data.get_per_sample_logit_mafs()
+            pred_dataframe.to_csv(config_data.output_prefix + ".seed" + str(cv_seed) + ".pred.tsv", sep='\t', index=False)
 
     roc_result = convert_roc_map_to_dataframe(roc_map, 4)
     roc_result.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
-    r2_result.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=False)
+    r2_result.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
 
 
 def read_features(feature_path):
@@ -91,8 +92,6 @@ def load_molcounts_data(fname, features, cancer_name):
     extra_keys.append("ctrl_sum")
     
     crc_data =  mdata[mdata.cancer_type.isin(["crc", "cancer_free"])][region_list + extra_keys]
-    #int_cols = region_list + ["ctrl_sum"]
-    #crc_data[int_cols] = crc_data[int_cols].astype(int32)
     return crc_data, region_list
 
 

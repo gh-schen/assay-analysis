@@ -1,6 +1,6 @@
 from mafUtility import singleRegModel, predOutcome
 from pandas import DataFrame
-from statistics import median
+from statistics import median, mean
 from numpy import log
 from sklearn import linear_model, feature_selection, metrics
 from scipy.special import logit, expit
@@ -245,7 +245,26 @@ class regData():
         return self.roc_dataframe
 
 
-    def get_r2_res_count(self, spec_cutoff):
+    def get_per_sample_logit_mafs(self):
+        if self.roc_dataframe is None:
+            raise Exception("Run get_roc first before getting per-sample logit!")
+
+        true_ys = []
+        test_ys = []
+        samples = []
+        train_ys = []
+        states = []
+        for k,v in self.pred_map.items():
+            samples.append(k)
+            true_ys.append(v.true_y)
+            test_ys.append(v.test_y)
+            train_ys.append(median(v.train_ys))
+            states.append(v.cancer_status)
+        pred_dataframe = DataFrame(data={"samples": samples, "true": true_ys, "pred": test_ys, "train": train_ys, "status": states})
+        return pred_dataframe
+
+
+    def get_r2_stats_dataframe(self, spec_cutoff):
         if self.roc_dataframe is None:
             raise Exception("Run get_roc first before getting R2!")
 
@@ -254,9 +273,12 @@ class regData():
         df = df.sort_values("abs_diff")
         logit_cutoff = df.iloc[0]["cutoff"]
 
-        residuals = []
-        true_ys = []
-        test_ys = []
+        residuals_logit = []
+        residuals_real = []
+        true_ys_real = []
+        test_ys_real = []
+        true_ys_logit = []
+        test_ys_logit = []
         num_pos = 0
         for k,v in self.pred_map.items():
             if v.cancer_status is None:
@@ -264,10 +286,19 @@ class regData():
             if v.test_y >= logit_cutoff:
                 num_pos += 1
                 if v.true_y is not None:
-                    rsd = v.test_y - v.true_y
-                    true_ys.append(v.true_y)
-                    test_ys.append(v.test_y)
-                    residuals.append(rsd)
-        r2 = metrics.r2_score(true_ys, test_ys)
-        return r2, residuals, num_pos, logit_cutoff
+                    true_ys_logit.append(v.true_y)
+                    test_ys_logit.append(v.test_y)
+                    residuals_logit.append(v.test_y - v.true_y)
+                    true_ys_real.append(expit(v.true_y))
+                    test_ys_real.append(expit(v.test_y))
+                    residuals_real.append(expit(v.test_y) - expit(v.true_y))
+
+        r2_result = DataFrame(data={"r2": [], "mean_residual": [], "median_residual": [], "num_positive": [], "cutoff": []})
+        r2_val = metrics.r2_score(true_ys_logit, test_ys_logit)
+        r2_result.loc["logit"] = [r2_val, mean(residuals_logit), median(residuals_logit), num_pos, logit_cutoff]
+        r2_val = metrics.r2_score(true_ys_real, test_ys_real)
+        r2_result.loc["real"] = [r2_val, mean(residuals_real), median(residuals_real), num_pos, expit(logit_cutoff)]
+        #r2_result = r2_result.round(num_digits)
+        return r2_result
+
 
