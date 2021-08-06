@@ -1,6 +1,6 @@
 from mafUtility import singleRegModel, predOutcome
 from pandas import DataFrame
-from statistics import median
+from statistics import median, mean
 from numpy import log
 from sklearn import linear_model, feature_selection, metrics
 from scipy.special import logit, expit
@@ -46,7 +46,7 @@ class regData():
             raise Exception("Cannot do %d fold CV with %d length of data." % (num_partitions, rawdata.shape[0]))
 
         new_x = (rawdata[regions] + self.x_offset_).div(rawdata[self.ctrl_key_].values, axis=0)
-        new_x = log(new_x)
+        new_x = log(new_x.astype('float'))
         #new_x[self.intercept_key_] = 1
         new_y = logit(rawdata[self.maf_key_].fillna(self.min_maf_))
 
@@ -99,7 +99,7 @@ class regData():
         if self.ctrl_key_ not in count_data.columns:
             raise Exception("Need to have the control key %s" % self.ctrl_key_)
 
-        indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_].sample(frac=1)
+        indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_].sample(frac=1, random_state=seed_value)
 
         # then set training
         init_cancer_index = (indata["cancer_type"] == self.cancer_type_str_) & (indata["somatic_call"] == 1)
@@ -206,7 +206,7 @@ class regData():
         specs = []
         sens = []
         d_all = DataFrame(data={"train": train_ys, "test": test_ys, "status": cancer_stats}, index=samples)
-        d_normal = d_all[d_all.status==0]
+        d_normal = d_all[d_all.status==0].sort_values("train", ascending=False)
         d_tumor = d_all[d_all.status==1]
         total_pos = d_tumor.shape[0]
         total_neg = d_normal.shape[0]
@@ -214,14 +214,23 @@ class regData():
         normal_values = list(set(d_normal["train"].to_list()))
         normal_values.sort(reverse=True)
 
+        # get upper and lower of cutoff
         max_tumor_y = d_normal["train"][0]
         min_tumor_y = d_normal["train"][-1]
-        for cval in normal_values: # start from top train y
-            num_fp = d_normal[d_normal.test >= min_tumor_y].shape[0]
-            if num_fp / total_neg >= self.min_spec_:
+        prev_cval = None
+        for cval in d_normal["train"].to_list(): # start from top train y
+            if prev_cval is None:
+                prev_cval = cval
+            else:
+                if cval == prev_cval:
+                    continue
+            num_fp = d_normal[d_normal.test >= cval].shape[0]
+            if num_fp / total_neg >= self.min_spec_: # stop at spec <= 1 - min_spec_
                 min_tumor_y = cval
                 break
+            prev_cval = cval
 
+        # calculate ROC between min_sepc ~ 100% spec
         intv = (max_tumor_y - min_tumor_y) / self.roc_intervals
         cutoffs = []
         for i in range(self.roc_intervals):
@@ -236,7 +245,26 @@ class regData():
         return self.roc_dataframe
 
 
-    def get_r2_res_count(self, spec_cutoff):
+    def get_per_sample_logit_mafs(self):
+        if self.roc_dataframe is None:
+            raise Exception("Run get_roc first before getting per-sample logit!")
+
+        true_ys = []
+        test_ys = []
+        samples = []
+        train_ys = []
+        states = []
+        for k,v in self.pred_map.items():
+            samples.append(k)
+            true_ys.append(v.true_y)
+            test_ys.append(v.test_y)
+            train_ys.append(median(v.train_ys))
+            states.append(v.cancer_status)
+        pred_dataframe = DataFrame(data={"samples": samples, "true": true_ys, "pred": test_ys, "train": train_ys, "status": states})
+        return pred_dataframe
+
+
+    def get_r2_stats_dataframe(self, spec_cutoff):
         if self.roc_dataframe is None:
             raise Exception("Run get_roc first before getting R2!")
 
@@ -245,9 +273,12 @@ class regData():
         df = df.sort_values("abs_diff")
         logit_cutoff = df.iloc[0]["cutoff"]
 
-        residuals = []
-        true_ys = []
-        test_ys = []
+        residuals_logit = []
+        residuals_real = []
+        true_ys_real = []
+        test_ys_real = []
+        true_ys_logit = []
+        test_ys_logit = []
         num_pos = 0
         for k,v in self.pred_map.items():
             if v.cancer_status is None:
@@ -255,10 +286,19 @@ class regData():
             if v.test_y >= logit_cutoff:
                 num_pos += 1
                 if v.true_y is not None:
-                    rsd = v.test_y - v.true_y
-                    true_ys.append(v.true_y)
-                    test_ys.append(v.test_y)
-                    residuals.append(rsd)
-        r2 = metrics.r2_score(true_ys, test_ys)
-        return r2, residuals, num_pos, logit_cutoff
+                    true_ys_logit.append(v.true_y)
+                    test_ys_logit.append(v.test_y)
+                    residuals_logit.append(v.test_y - v.true_y)
+                    true_ys_real.append(expit(v.true_y))
+                    test_ys_real.append(expit(v.test_y))
+                    residuals_real.append(expit(v.test_y) - expit(v.true_y))
+
+        r2_result = DataFrame(data={"r2": [], "mean_residual": [], "median_residual": [], "num_positive": [], "cutoff": []})
+        r2_val = metrics.r2_score(true_ys_logit, test_ys_logit)
+        r2_result.loc["logit"] = [r2_val, mean(residuals_logit), median(residuals_logit), num_pos, logit_cutoff]
+        r2_val = metrics.r2_score(true_ys_real, test_ys_real)
+        r2_result.loc["real"] = [r2_val, mean(residuals_real), median(residuals_real), num_pos, expit(logit_cutoff)]
+        #r2_result = r2_result.round(num_digits)
+        return r2_result
+
 
