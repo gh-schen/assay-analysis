@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 
 import logging
+from statistics import mean
 from sys import argv
 from typing import final
+from numpy import single
+
+from pandas.core.frame import DataFrame
 from MafCrcModel import regData
 from configData import configData
 from Run_on_mcm import load_molcounts_data, read_features, run_single_iteration
@@ -22,38 +26,50 @@ def main():
 
     logging.info("Start iterations")
     simu_sizes = [100, 200, 400, 600]
-    simu_seed = 100
-    shuffle_data = mcm_data.sample(frac=1, random_state=simu_seed)
-    final_r2 = None
-    final_roc = None
+    #simu_sizes = [100]
 
-    cv_seed = 0
-    r2_result, roc_result, pred_dataframe = run_single_iteration(shuffle_data, raw_regions, 0)
-    final_r2 = r2_result
-    final_r2["type"] = "crc"
-    final_r2["num_samples"] = shuffle_data[shuffle_data["cancer_type"]=="crc"].shape[0]
-    final_roc = roc_result
-    final_roc["type"] = "crc"
-    final_roc["num_samples"] = shuffle_data[shuffle_data["cancer_type"]=="crc"].shape[0]
+    total_iters = 5
+    r2_map = {} # type -> sample -> r2s
+    for ctype in ["crc", "cancer_free"]:
+        r2_map[ctype] = {}
+        for num_samples in simu_sizes:
+            r2_map[ctype][num_samples] = []
 
-    for num_samples in simu_sizes:
-        for ctype in ["crc", "cancer_free"]:
-            r2_result, roc_result = gen_simu_result(shuffle_data, raw_regions, num_samples, ctype)
-            new_r2 = r2_result
-            new_r2["type"] = ctype
-            new_r2["num_samples"] = num_samples
-            final_r2 = final_r2.append(new_r2)
-            new_roc = roc_result
-            new_roc["type"] = ctype
-            new_roc["num_samples"] = num_samples
-            final_roc = final_roc.append(new_roc)
+    for shuffle_seed in range(total_iters):
+        shuffle_data = mcm_data.sample(frac=1, random_state=shuffle_seed)
+
+        r2_result, roc_result, pred_dataframe = run_single_iteration(shuffle_data, raw_regions, shuffle_seed)
+        single_r2 = r2_result.loc["logit"]["r2"].item()
+        r2_map["crc"][shuffle_data[shuffle_data["cancer_type"]=="crc"].shape[0]] = [single_r2]
+        r2_map["cancer_free"][shuffle_data[shuffle_data["cancer_type"]=="cancer_free"].shape[0]] = [single_r2]
+
+        final_roc = roc_result
+        final_roc["type"] = "crc"
+        final_roc["num_samples"] = shuffle_data[shuffle_data["cancer_type"]=="crc"].shape[0]
+        dummy = roc_result.copy()
+        dummy["type"] = "cancer_free"
+        dummy["num_samples"] = shuffle_data[shuffle_data["cancer_type"]=="cancer_free"].shape[0]
+        final_roc = final_roc.append(dummy)
+        for num_samples in simu_sizes:
+            for ctype in ["crc", "cancer_free"]:
+                r2_result, roc_result = gen_simu_result(shuffle_data, raw_regions, num_samples, ctype, shuffle_seed)
+                new_roc = roc_result
+                new_roc["type"] = ctype
+                new_roc["num_samples"] = num_samples
+                final_roc = final_roc.append(new_roc)
+                r2_map[ctype][num_samples].append(r2_result.loc["logit"]["r2"].item())
     
     final_roc.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
+
+    final_r2 = DataFrame(data={"r2": [], "type": [], "num_samples": []})
+    for ctype, cinfo in r2_map.items():
+        for ns, ninfo in cinfo.items():
+            final_r2.loc[final_r2.shape[0]] = [mean(ninfo), ctype, ns]
+
     final_r2.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
 
 
-def gen_simu_result(shuffle_data, raw_regions, num_samples, ctype):
-    cv_seed = 0
+def gen_simu_result(shuffle_data, raw_regions, num_samples, ctype, cv_seed):
     indata = shuffle_data[shuffle_data["cancer_type"] != ctype]
     indata = indata.append(shuffle_data[shuffle_data["cancer_type"] == ctype].iloc[:num_samples])
     r2_result, roc_result, pred_dataframe = run_single_iteration(indata, raw_regions, cv_seed)
