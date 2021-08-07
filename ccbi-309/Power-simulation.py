@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
-from statistics import mean
+from statistics import mean, median
 from sys import argv
 from typing import final
 from numpy import single
@@ -28,45 +28,73 @@ def main():
     simu_sizes = [100, 200, 400, 600]
     #simu_sizes = [100]
 
-    total_iters = 5
+    total_iters = 6
     r2_map = {} # type -> sample -> r2s
+    roc_map = {} # type -> sample -> spec -> sensis
     for ctype in ["crc", "cancer_free"]:
         r2_map[ctype] = {}
+        roc_map[ctype] = {}
         for num_samples in simu_sizes:
             r2_map[ctype][num_samples] = []
+            roc_map[ctype][num_samples] = {}
+            for i in range(80, 101):
+                spec = i / 100
+                roc_map[ctype][num_samples][spec] = []
+
+    for ctype in ["crc", "cancer_free"]:
+        r2_map[ctype][mcm_data[mcm_data["cancer_type"]==ctype].shape[0]] = []
+        roc_map[ctype][mcm_data[mcm_data["cancer_type"]==ctype].shape[0]] = {}
+        for i in range(80, 101):
+            spec = i / 100
+            roc_map[ctype][mcm_data[mcm_data["cancer_type"]==ctype].shape[0]][spec] = []
 
     for shuffle_seed in range(total_iters):
+        print("doing iter #" + str(shuffle_seed))
         shuffle_data = mcm_data.sample(frac=1, random_state=shuffle_seed)
 
         r2_result, roc_result, pred_dataframe = run_single_iteration(shuffle_data, raw_regions, shuffle_seed)
         single_r2 = r2_result.loc["logit"]["r2"].item()
-        r2_map["crc"][shuffle_data[shuffle_data["cancer_type"]=="crc"].shape[0]] = [single_r2]
-        r2_map["cancer_free"][shuffle_data[shuffle_data["cancer_type"]=="cancer_free"].shape[0]] = [single_r2]
 
-        final_roc = roc_result
-        final_roc["type"] = "crc"
-        final_roc["num_samples"] = shuffle_data[shuffle_data["cancer_type"]=="crc"].shape[0]
-        dummy = roc_result.copy()
-        dummy["type"] = "cancer_free"
-        dummy["num_samples"] = shuffle_data[shuffle_data["cancer_type"]=="cancer_free"].shape[0]
-        final_roc = final_roc.append(dummy)
+        for ctype in ["crc", "cancer_free"]:
+            r2_map[ctype][mcm_data[mcm_data["cancer_type"]==ctype].shape[0]].append(single_r2)
+
+            for idx, d2 in roc_result.iterrows():
+                spec = round(d2["specificity"].item(), 2)
+                if spec < 0.8:
+                    continue
+                sensi = d2["sensitivity"].item()
+                roc_map[ctype][shuffle_data[shuffle_data["cancer_type"]==ctype].shape[0]][spec].append(sensi)
+
         for num_samples in simu_sizes:
             for ctype in ["crc", "cancer_free"]:
                 r2_result, roc_result = gen_simu_result(shuffle_data, raw_regions, num_samples, ctype, shuffle_seed)
-                new_roc = roc_result
-                new_roc["type"] = ctype
-                new_roc["num_samples"] = num_samples
-                final_roc = final_roc.append(new_roc)
                 r2_map[ctype][num_samples].append(r2_result.loc["logit"]["r2"].item())
-    
-    final_roc.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
+
+                for idx, d2 in roc_result.iterrows():
+                    spec = round(d2["specificity"].item(), 2)
+                    if spec < 0.8:
+                        continue
+                    sensi = d2["sensitivity"].item()
+                    roc_map[ctype][num_samples][spec].append(sensi)
 
     final_r2 = DataFrame(data={"r2": [], "type": [], "num_samples": []})
     for ctype, cinfo in r2_map.items():
         for ns, ninfo in cinfo.items():
-            final_r2.loc[final_r2.shape[0]] = [mean(ninfo), ctype, ns]
+            for rval in ninfo:
+                final_r2.loc[final_r2.shape[0]] = [rval, ctype, ns]
 
     final_r2.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
+
+    final_roc = DataFrame(data={"spec": [], "median_spec": [], "mean_spec": [], "min_spec": [], "max_spec": [], "type": [], "num_samples": []})
+    for ctype, c1 in roc_map.items():
+        for ns, c2 in c1.items():
+            for spec, sens in c2.items():
+                if not sens:
+                    continue
+                olist = [spec, median(sens), mean(sens), min(sens), max(sens)]
+                olist += [ctype, ns]
+                final_roc.loc[final_roc.shape[0]] = olist
+    final_roc.to_csv(config_data.output_prefix + ".roc.tsv", sep="\t", index=True)
 
 
 def gen_simu_result(shuffle_data, raw_regions, num_samples, ctype, cv_seed):
