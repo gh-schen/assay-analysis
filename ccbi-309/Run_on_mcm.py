@@ -30,19 +30,29 @@ def main():
     logging.info("Start CV.")
     roc_map = {}
     final_r2 = None
+    final_pred = None
     for cv_idx in range(config_data.total_iterations):
         cv_seed = config_data.iteration_start_seed + cv_idx
         r2_result, roc_result, pred_dataframe = run_single_iteration(config_data, mcm_data, raw_regions, cv_seed)
         set_roc(roc_map, roc_result, num_digits=3)
         if cv_idx == 0: # only print pred for first iteration
             final_r2 = r2_result
-            pred_dataframe.to_csv(config_data.output_prefix + ".seed" + str(cv_seed) + ".pred.tsv", sep='\t', index=False)
+            final_pred = pred_dataframe
+            final_pred.columns = ["samples", "true", "pred0", "train0", "status"]
+            final_pred.index = final_pred["samples"]
+            final_pred.pop("samples")
         else:
             final_r2 = final_r2.append(r2_result)
+            pred_dataframe.index = pred_dataframe["samples"]
+            for k in ["samples", "true", "status"]:
+                pred_dataframe.pop(k)
+            pred_dataframe.columns = ["pred" + str(cv_idx), "train" + str(cv_idx)]
+            final_pred = final_pred.add(pred_dataframe)
 
     final_roc = convert_roc_map_to_dataframe(roc_map, 4)
     final_roc.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
     final_r2.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
+    final_pred.to_csv(config_data.output_prefix + ".pred.tsv", sep='\t', index=False)
 
 
 def run_single_iteration(mcm_data, raw_regions, cv_seed):
