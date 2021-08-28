@@ -124,11 +124,11 @@ def set_roc(roc_map, reg_roc, num_digits):
 
 
 def convert_roc_map_to_dataframe(roc_map, num_digits):
-    specs_sorted = sorted(list(roc_map.keys()), reverse=True)
+    fpr_sorted = sorted(list(roc_map.keys()), reverse=True)
     roc_result = DataFrame(data={"specificity": [], "min": [], "max": [], "mean": [], "median": [], "num_points": []})
-    for spec in specs_sorted:
-        sensis = 1 - roc_map[spec]
-        ds = [spec, min(sensis), max(sensis), mean(sensis), median(sensis), len(sensis)]
+    for fval in fpr_sorted:
+        sensis = roc_map[fval]
+        ds = [1-fval, min(sensis), max(sensis), mean(sensis), median(sensis), len(sensis)]
         ds[:-1] = [round(x, num_digits) for x in ds[:-1]]
         roc_result.loc[roc_result.shape[0]] = ds
     return roc_result
