@@ -116,18 +116,18 @@ def load_molcounts_data(fname, features, cancer_name):
 def set_roc(roc_map, reg_roc, num_digits):
     # add ROC result from one single run
     for idx, dt in reg_roc.iterrows():
-        dkey = round(dt["specificity"], num_digits)
-        sensi = dt["sensitivity"]
-        if dkey not in roc_map:
-            roc_map[dkey] = []
-        roc_map[dkey].append(sensi)
+        fpr = round(dt["fpr"], num_digits)
+        tpr = dt["tpr"]
+        if fpr not in roc_map:
+            roc_map[fpr] = []
+        roc_map[fpr].append(tpr)
 
 
 def convert_roc_map_to_dataframe(roc_map, num_digits):
     specs_sorted = sorted(list(roc_map.keys()), reverse=True)
     roc_result = DataFrame(data={"specificity": [], "min": [], "max": [], "mean": [], "median": [], "num_points": []})
     for spec in specs_sorted:
-        sensis = roc_map[spec]
+        sensis = 1 - roc_map[spec]
         ds = [spec, min(sensis), max(sensis), mean(sensis), median(sensis), len(sensis)]
         ds[:-1] = [round(x, num_digits) for x in ds[:-1]]
         roc_result.loc[roc_result.shape[0]] = ds
