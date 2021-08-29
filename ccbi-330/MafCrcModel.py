@@ -23,7 +23,7 @@ class regData():
         self.maf_key_ = y_key
         #self.intercept_key_ = "intercept"
         self.min_total_pos_ctrl_ = 500 # 
-        self.follow_iter_ = 4 # number of iterations for training data points with no MAF
+        self.follow_iter_ = 1 # number of iterations for training data points with no MAF
         self.total_explained_variance_ = 0.9 # total variance explained
         self.num_components_list = [0] * cv # finally how many components were used
         # data
@@ -116,18 +116,19 @@ class regData():
     def _clean_input_data(self, count_data, raw_regions):
         # remove those with low pos ctrl count
         indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_]
-        min_max_norm_count = 2e-05
-        tn_min = 0
+        min_max_norm_count = 2e-06
+        tn_min = 0.3
         min_norm_val = 1e-10
 
         # filter on max
         dt_tumor = indata[indata["cancer_type"] == self.cancer_type_str_]
+        dt_tumor = dt_tumor[raw_regions].div(dt_tumor[self.ctrl_key_].values, axis=0)
         count_filter = dt_tumor[raw_regions].max(axis=0) >= min_max_norm_count
         tmp_regions = dt_tumor[raw_regions].columns[count_filter]
+        dt_tumor = dt_tumor[tmp_regions]
         print(len(tmp_regions))
 
         # remove those with normal > tumor (threshold varies)
-        dt_tumor = dt_tumor[tmp_regions].div(dt_tumor[self.ctrl_key_].values, axis=0)
         dt_normal = indata[indata["cancer_type"] == self.cancer_free_str_]
         dt_normal = dt_normal[tmp_regions].div(dt_normal[self.ctrl_key_].values, axis=0)
 
@@ -154,6 +155,8 @@ class regData():
             raise Exception("Need to have the control key %s" % self.ctrl_key_)
 
         indata, regions = self._clean_input_data(count_data, input_regions)
+        #indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_]
+        #regions = input_regions
         indata = indata.sample(frac=1, random_state=seed_value)
 
         # then set training
