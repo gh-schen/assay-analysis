@@ -10,6 +10,8 @@ from pandas.core.frame import DataFrame
 from MafCrcModel import regData
 from configData import configData
 
+from subprocess import check_call
+
 """
 Gateway of running simulation/prediction/modeling
 """
@@ -55,6 +57,11 @@ def main():
     final_r2.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
     final_pred = final_pred.round(num_digits)
     final_pred.to_csv(config_data.output_prefix + ".pred.tsv", sep='\t', index=True)
+
+    check_call("cat " + config_data.output_prefix + ".r2.tsv", shell=True)
+    cmd = "cat " + config_data.output_prefix + ".roc.tsv | awk '$1>=0.95' | head -n 2"
+    print(cmd)
+    check_call(cmd, shell=True)
 
 
 def run_single_iteration(mcm_data, raw_regions, cv_seed):
