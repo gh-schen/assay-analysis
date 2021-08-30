@@ -60,7 +60,6 @@ def main():
 
     check_call("cat " + config_data.output_prefix + ".r2.tsv", shell=True)
     cmd = "cat " + config_data.output_prefix + ".roc.tsv | awk '$1>=0.95' | head -n 2"
-    print(cmd)
     check_call(cmd, shell=True)
 
 

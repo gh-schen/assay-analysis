@@ -10,8 +10,9 @@ class regData():
     """
     data struct for running CV regression - use singleRegModel as its core
     """
-    #def __init__(self, regressor=linear_model.HuberRegressor(epsilon=1.4), cv=4, mf=1e-06, y_key="maf"):
-    def __init__(self, regressor=linear_model.Lasso(), cv=4, mf=1e-06, y_key="maf"):
+    def __init__(self, regressor=linear_model.BayesianRidge(), cv=4, mf=1e-06, y_key="maf"):
+    #def __init__(self, regressor=linear_model.ElasticNet(), cv=4, mf=1e-06, y_key="maf"):
+    #def __init__(self, regressor=linear_model.Ridge(), cv=4, mf=1e-06, y_key="maf"):
     #def __init__(self, regressor=linear_model.LinearRegression(), cv=4, mf=1e-06, y_key="maf"):
         # params
         self.min_maf_ = mf
@@ -117,7 +118,7 @@ class regData():
         # remove those with low pos ctrl count
         indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_]
         min_max_norm_count = 2e-06
-        tn_min = 0.3
+        tn_min = 0.6
         min_norm_val = 1e-10
 
         # filter on max
@@ -132,9 +133,9 @@ class regData():
         dt_normal = indata[indata["cancer_type"] == self.cancer_free_str_]
         dt_normal = dt_normal[tmp_regions].div(dt_normal[self.ctrl_key_].values, axis=0)
 
-        sum_tumor = dt_tumor.sum(axis=0)
+        sum_tumor = dt_tumor.median(axis=0)
         sum_tumor.columns = ["sum"]
-        sum_normal = dt_normal.sum(axis=0)
+        sum_normal = dt_normal.median(axis=0)
         sum_normal.columns = ["sum"]
         sum_normal = sum_normal.replace(0, min_norm_val)
 
