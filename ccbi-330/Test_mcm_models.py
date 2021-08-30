@@ -47,7 +47,8 @@ def main():
             final_pred.index = final_pred["samples"]
             final_pred.pop("samples")
         else:
-            final_r2 = final_r2.append(r2_result)
+            if not config_data.binary:
+                final_r2 = final_r2.append(r2_result)
             pred_dataframe.index = pred_dataframe["samples"]
             for k in ["samples", "true", "status"]:
                 pred_dataframe.pop(k)
@@ -57,16 +58,18 @@ def main():
 
     final_roc = convert_roc_map_to_dataframe(roc_map, num_digits)
     final_roc.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
-    final_r2.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
+    if not config_data.binary:
+        final_r2.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
     final_pred = final_pred.round(num_digits)
     final_pred.to_csv(config_data.output_prefix + ".pred.tsv", sep='\t', index=True)
     outfile = open(config_data.output_prefix + ".metrics.json", 'w')
     json.dump(final_metrics, outfile)
     outfile.close()
 
-    #check_call("cat " + config_data.output_prefix + ".r2.tsv", shell=True)
-    #cmd = "cat " + config_data.output_prefix + ".roc.tsv | awk '$1>=0.95' | head -n 2"
-    #check_call(cmd, shell=True)
+    if not config_data.binary:
+        check_call("cat " + config_data.output_prefix + ".r2.tsv", shell=True)
+    cmd = "cat " + config_data.output_prefix + ".roc.tsv | awk '$1>=0.95' | head -n 2"
+    check_call(cmd, shell=True)
 
 
 def run_single_iteration(mcm_data, raw_regions, config_data, cv_seed):
@@ -78,7 +81,10 @@ def run_single_iteration(mcm_data, raw_regions, config_data, cv_seed):
     logging.info("Finished set up model with %d follow up iteration.", reg_data.follow_iter_)
     
     roc_result = reg_data.get_roc()
-    r2_result = reg_data.get_r2_stats_dataframe(0.95)
+    if config_data.binary:
+        r2_result = None
+    else:
+        r2_result = reg_data.get_r2_stats_dataframe(0.95)
     pred_dataframe = reg_data.get_per_sample_logit_mafs()
     return r2_result, roc_result, pred_dataframe, reg_data.output_metrics
 

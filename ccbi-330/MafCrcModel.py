@@ -18,10 +18,11 @@ class regData():
         self.num_cv_ = 4
         self.cancer_type_str_ = params.cancer_type
         self.cancer_free_str_ = "cancer_free"
+        self.label_key_ = "cancer_type"
         self.ctrl_key_ = "ctrl_sum"
         self.maf_key_ = "maf"
         #self.intercept_key_ = "intercept"
-        self.min_total_pos_ctrl_ = 500 # 
+        self.min_total_pos_ctrl_ = 500
         self.follow_iter_ = 1 # number of iterations for training data points with no MAF
         self.total_explained_variance_ = 0.9 # total variance explained
         self.num_components_list = [0] * self.num_cv_ # finally how many components were used
@@ -31,6 +32,7 @@ class regData():
         self.follow_train_x = []
         self.follow_train_indexes = []
         self.init_train_y = []
+        self.follow_train_labels = []
         self.test_x = []
         self.test_indexes = []
         self.test_y = []
@@ -45,6 +47,7 @@ class regData():
         if params.scaler_str:
             self.scaler_ = eval(params.scaler_str)
         # model
+        self.is_binary_classifier_ = params.binary
         self.regressor_ = eval(params.regressor_str)
         # result
         self.pred_map = {}
@@ -60,7 +63,12 @@ class regData():
 
         new_x = (rawdata[regions] + self.x_offset_).div(rawdata[self.ctrl_key_].values, axis=0)
         new_x = log(new_x.astype('float'))
-        new_y = logit(rawdata[self.maf_key_].fillna(self.min_maf_))
+        if self.is_binary_classifier_:
+            new_y = rawdata[self.label_key_]
+            new_y = new_y.replace(self.cancer_type_str_, 1)
+            new_y = new_y.replace(self.cancer_free_str_, 0)
+        else:
+            new_y = logit(rawdata[self.maf_key_].fillna(self.min_maf_))
 
         pstart = 0
         pindex = 0
@@ -93,6 +101,7 @@ class regData():
                 self.follow_test_x.append(x_test)
                 self.follow_train_indexes.append(x_train.index.to_list())
                 self.follow_test_indexes.append(x_test.index.to_list())
+                self.follow_train_labels.append(y_train)
             pindex += 1
             pstart = pstop
 
@@ -125,14 +134,14 @@ class regData():
     def _clean_input_data(self, count_data, raw_regions):
         min_norm_val = 1e-10
         # filter on max counts
-        dt_tumor = count_data[count_data["cancer_type"] == self.cancer_type_str_]
+        dt_tumor = count_data[count_data[self.label_key_] == self.cancer_type_str_]
         dt_tumor = dt_tumor[raw_regions].div(dt_tumor[self.ctrl_key_].values, axis=0)
         count_filter = dt_tumor[raw_regions].max(axis=0) >= self.min_norm_count_in_max_
         tmp_regions = dt_tumor[raw_regions].columns[count_filter]
         dt_tumor = dt_tumor[tmp_regions]
 
         # remove those with normal > tumor (threshold varies)
-        dt_normal = count_data[count_data["cancer_type"] == self.cancer_free_str_]
+        dt_normal = count_data[count_data[self.label_key_] == self.cancer_free_str_]
         dt_normal = dt_normal[tmp_regions].div(dt_normal[self.ctrl_key_].values, axis=0)
 
         wt_tumor = dt_tumor.max(axis=0)
@@ -187,8 +196,8 @@ class regData():
             regions = input_regions
 
         # then set training
-        init_cancer_index = (indata["cancer_type"] == self.cancer_type_str_) & (indata["somatic_call"] == 1)
-        init_normal_index = (indata["cancer_type"] == self.cancer_free_str_) & (indata["somatic_call"] == 0)
+        init_cancer_index = (indata[self.label_key_] == self.cancer_type_str_) & (indata["somatic_call"] == 1)
+        init_normal_index = (indata[self.label_key_] == self.cancer_free_str_) & (indata["somatic_call"] == 0)
 
         init_cancer = indata[init_cancer_index]
         init_normal = indata[init_normal_index]
@@ -223,7 +232,7 @@ class regData():
         for s in init_normal.index:
             self.pred_map[s].cancer_status = 0
         for dname, dinfo in follows.iterrows():
-            ct = dinfo["cancer_type"]
+            ct = dinfo[self.label_key_]
             if ct == self.cancer_type_str_:
                 cstatus = 1
             elif ct == self.cancer_free_str_:
@@ -233,33 +242,57 @@ class regData():
             self.pred_map[dname].cancer_status = cstatus
 
 
+    def _run_binary_prediction(self, srm, iter_index):
+        x_train = concatenate((self.init_train_x[iter_index], self.follow_train_x[iter_index]))
+        y_train = concatenate((self.init_train_y[iter_index], self.follow_train_labels[iter_index]))
+        x_test = concatenate((self.test_x[iter_index], self.follow_test_x[iter_index]))
+        srm.train_binary(x_train, y_train)
+
+        train_y = srm.predict_prob(x_train)
+        tlist = self.init_indexes[iter_index] + self.follow_train_indexes[iter_index]
+        for j in range(len(tlist)):
+            self.pred_map[tlist[j]].train_ys.append(train_y[j])
+
+        test_y = srm.predict_prob(x_test)
+        tlist = self.test_indexes[iter_index] + self.follow_test_indexes[iter_index]
+        for j in range(len(tlist)):
+            self.pred_map[tlist[j]].test_y = test_y[j]
+
+
+    def _run_quant_prediction(self, srm, iter_index):
+        srm.train_quant(self.init_train_x[iter_index], self.follow_train_x[iter_index], self.init_train_y[iter_index], self.follow_iter_)
+
+        # init training
+        train_y = srm.predict_quant(self.init_train_x[iter_index])
+        tlist = self.init_indexes[iter_index]
+        for j in range(len(tlist)):
+            self.pred_map[tlist[j]].train_ys.append(train_y[j])
+
+        # init test
+        test_y = srm.predict_quant(self.test_x[iter_index])
+        tlist = self.test_indexes[iter_index]
+        for j in range(len(tlist)):
+            self.pred_map[tlist[j]].test_y = test_y[j]
+
+        # follow up train & test
+        train_y = srm.predict_quant(self.follow_train_x[iter_index])
+        tlist = self.follow_train_indexes[iter_index]
+        for j in range(len(tlist)):
+            self.pred_map[tlist[j]].train_ys.append(train_y[j])
+
+        test_y = srm.predict_quant(self.follow_test_x[iter_index])
+        tlist = self.follow_test_indexes[iter_index]
+        for j in range(len(tlist)):
+            self.pred_map[tlist[j]].test_y = test_y[j]
+
+
     def run_cv_maf_predict(self):
         for ii in range(self.num_cv_):
             srm = singleRegModel(self.regressor_)
-            srm.train(self.init_train_x[ii], self.follow_train_x[ii], self.init_train_y[ii], self.follow_iter_)
-
-            # init training
-            train_y = srm.predict(self.init_train_x[ii])
-            tlist = self.init_indexes[ii]
-            for j in range(len(tlist)):
-                self.pred_map[tlist[j]].train_ys.append(train_y[j])
-
-            # init test
-            test_y = srm.predict(self.test_x[ii])
-            tlist = self.test_indexes[ii]
-            for j in range(len(tlist)):
-                self.pred_map[tlist[j]].test_y = test_y[j]
-
-            # follow up train & test
-            train_y = srm.predict(self.follow_train_x[ii])
-            tlist = self.follow_train_indexes[ii]
-            for j in range(len(tlist)):
-                self.pred_map[tlist[j]].train_ys.append(train_y[j])
-
-            test_y = srm.predict(self.follow_test_x[ii])
-            tlist = self.follow_test_indexes[ii]
-            for j in range(len(tlist)):
-                self.pred_map[tlist[j]].test_y = test_y[j]
+            if self.is_binary_classifier_:
+                self._run_binary_prediction(srm, ii)
+            else:
+                self._run_quant_prediction(srm, ii)
 
 
     def get_roc(self):
