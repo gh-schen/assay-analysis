@@ -2,31 +2,29 @@ from mafUtility import singleRegModel, predOutcome
 from pandas import DataFrame
 from statistics import median, mean
 from numpy import log, concatenate
-from sklearn import linear_model, feature_selection, metrics, decomposition
+from sklearn import linear_model, preprocessing, metrics, decomposition
 from scipy.special import logit, expit
+from copy import deepcopy
 
 
 class regData():
     """
     data struct for running CV regression - use singleRegModel as its core
     """
-    def __init__(self, regressor=linear_model.BayesianRidge(), cv=4, mf=1e-06, y_key="maf"):
-    #def __init__(self, regressor=linear_model.ElasticNet(), cv=4, mf=1e-06, y_key="maf"):
-    #def __init__(self, regressor=linear_model.Ridge(), cv=4, mf=1e-06, y_key="maf"):
-    #def __init__(self, regressor=linear_model.LinearRegression(), cv=4, mf=1e-06, y_key="maf"):
+    def __init__(self, params):
         # params
-        self.min_maf_ = mf
+        self.min_maf_ = 1e-06
         self.x_offset_ = 0.1
-        self.num_cv_ = cv
-        self.cancer_type_str_ = "crc"
+        self.num_cv_ = 4
+        self.cancer_type_str_ = params.cancer_type
         self.cancer_free_str_ = "cancer_free"
         self.ctrl_key_ = "ctrl_sum"
-        self.maf_key_ = y_key
+        self.maf_key_ = "maf"
         #self.intercept_key_ = "intercept"
         self.min_total_pos_ctrl_ = 500 # 
         self.follow_iter_ = 1 # number of iterations for training data points with no MAF
         self.total_explained_variance_ = 0.9 # total variance explained
-        self.num_components_list = [0] * cv # finally how many components were used
+        self.num_components_list = [0] * self.num_cv_ # finally how many components were used
         # data
         self.init_train_x = [] # partitions of training x
         self.init_indexes = []
@@ -38,11 +36,21 @@ class regData():
         self.test_y = []
         self.follow_test_x = []
         self.follow_test_indexes = []
+        # data params
+        self.do_clean_up_ = params.do_clean_up
+        self.do_transform_ = params.do_transform
+        self.min_norm_count_in_max_ = 2e-06
+        self.tumor_normal_ratio_min_ = params.tumor_normal_ratio_min
+        self.scaler_ = None
+        if params.scaler_str:
+            self.scaler_ = eval(params.scaler_str)
         # model
-        self.regressor_ = regressor
+        self.regressor_ = eval(params.regressor_str)
         # result
         self.pred_map = {}
         self.roc_dataframe = None
+        # result metrics
+        self.output_metrics = {"num_components": [], "num_features_after_clean_up": None}
         
 
     def _set_split_data(self, rawdata, regions, num_partitions, maf_exist):
@@ -52,7 +60,6 @@ class regData():
 
         new_x = (rawdata[regions] + self.x_offset_).div(rawdata[self.ctrl_key_].values, axis=0)
         new_x = log(new_x.astype('float'))
-        #new_x[self.intercept_key_] = 1
         new_y = logit(rawdata[self.maf_key_].fillna(self.min_maf_))
 
         pstart = 0
@@ -104,6 +111,7 @@ class regData():
             num_comp += 1
             if total_var >= self.total_explained_variance_:
                 break
+        self.output_metrics["num_components"].append(num_comp)
 
         new_pca = decomposition.PCA(n_components=num_comp)
         new_pca.fit(d_pca)
@@ -111,54 +119,72 @@ class regData():
         t_follow = new_pca.transform(raw_follow)
         t_test = new_pca.transform(raw_test)
         t_follow_test = new_pca.transform(raw_follow_test)
-        return t_init, t_follow, t_test, t_follow_test, num_comp
+        return t_init, t_follow, t_test, t_follow_test
 
 
     def _clean_input_data(self, count_data, raw_regions):
-        # remove those with low pos ctrl count
-        indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_]
-        min_max_norm_count = 2e-06
-        tn_min = 0.6
         min_norm_val = 1e-10
-
-        # filter on max
-        dt_tumor = indata[indata["cancer_type"] == self.cancer_type_str_]
+        # filter on max counts
+        dt_tumor = count_data[count_data["cancer_type"] == self.cancer_type_str_]
         dt_tumor = dt_tumor[raw_regions].div(dt_tumor[self.ctrl_key_].values, axis=0)
-        count_filter = dt_tumor[raw_regions].max(axis=0) >= min_max_norm_count
+        count_filter = dt_tumor[raw_regions].max(axis=0) >= self.min_norm_count_in_max_
         tmp_regions = dt_tumor[raw_regions].columns[count_filter]
         dt_tumor = dt_tumor[tmp_regions]
-        print(len(tmp_regions))
 
         # remove those with normal > tumor (threshold varies)
-        dt_normal = indata[indata["cancer_type"] == self.cancer_free_str_]
+        dt_normal = count_data[count_data["cancer_type"] == self.cancer_free_str_]
         dt_normal = dt_normal[tmp_regions].div(dt_normal[self.ctrl_key_].values, axis=0)
 
-        sum_tumor = dt_tumor.median(axis=0)
-        sum_tumor.columns = ["sum"]
-        sum_normal = dt_normal.median(axis=0)
-        sum_normal.columns = ["sum"]
-        sum_normal = sum_normal.replace(0, min_norm_val)
+        wt_tumor = dt_tumor.max(axis=0)
+        wt_tumor.columns = ["weight"]
+        wt_normal = dt_normal.median(axis=0)
+        wt_normal.columns = ["weight"]
+        wt_normal = wt_normal.replace(0, min_norm_val)
 
-        dt_merge = sum_tumor.div(sum_normal)
-        new_regions = dt_merge[dt_merge>=tn_min].index.to_list()
-        print(len(new_regions))
+        dt_merge = wt_tumor.div(wt_normal)
+        new_regions = dt_merge[dt_merge >= self.tumor_normal_ratio_min_].index.to_list()
+
         removed_cols = set(new_regions) ^ set(raw_regions)
         kept_cols = list(set(count_data.columns.to_list()) ^ removed_cols)
         new_data = count_data[kept_cols]
         return new_data, new_regions
 
 
-    def set_cv_data(self, count_data, input_regions, seed_value):
+    def _normalize_input_data(self):
+        for ii in range(self.num_cv_):
+            d_train = concatenate((self.init_train_x[ii], self.follow_train_x[ii]))
+            scaler = deepcopy(self.scaler_)
+            scaler.fit(d_train)
+            self.init_train_x[ii] = scaler.transform(self.init_train_x[ii])
+            self.follow_train_x[ii] = scaler.transform(self.follow_train_x[ii])
+            self.test_x[ii] = scaler.transform(self.test_x[ii])
+            self.follow_test_x[ii] = scaler.transform(self.follow_test_x[ii])
+
+
+    def _transform_input_data(self):
+        for ii in range(self.num_cv_):
+            t_init_train, t_follow_train, t_init_test, t_follow_test = self._transform_features(
+                self.init_train_x[ii], self.follow_train_x[ii], self.test_x[ii], self.follow_test_x[ii])
+            self.init_train_x[ii] = t_init_train
+            self.follow_train_x[ii] = t_follow_train
+            self.test_x[ii] = t_init_test
+            self.follow_test_x[ii] = t_follow_test
+
+
+    def set_cv_data(self, count_data, input_regions, shuffle_seed):
         """
         Prepare CV by partitioning & transforming data
         """
         if self.ctrl_key_ not in count_data.columns:
             raise Exception("Need to have the control key %s" % self.ctrl_key_)
 
-        indata, regions = self._clean_input_data(count_data, input_regions)
-        #indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_]
-        #regions = input_regions
-        indata = indata.sample(frac=1, random_state=seed_value)
+        indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_].sort_index()
+        if self.do_clean_up_:
+            indata, regions = self._clean_input_data(indata, input_regions)
+            indata = indata.sample(frac=1, random_state=shuffle_seed)
+            self.output_metrics["num_features_after_clean_up"] = len(regions)
+        else:
+            regions = input_regions
 
         # then set training
         init_cancer_index = (indata["cancer_type"] == self.cancer_type_str_) & (indata["somatic_call"] == 1)
@@ -168,9 +194,12 @@ class regData():
         init_normal = indata[init_normal_index]
         follows = indata[~(init_cancer_index | init_normal_index)]
 
-        self._set_split_data(init_cancer, regions, self.num_cv_, True)
-        self._set_split_data(init_normal, regions, self.num_cv_, True)
-        self._set_split_data(follows, regions, self.num_cv_, False)
+        self._set_split_data(init_cancer, regions, self.num_cv_, maf_exist=True)
+        self._set_split_data(init_normal, regions, self.num_cv_, maf_exist=True)
+        self._set_split_data(follows, regions, self.num_cv_, maf_exist=False)
+
+        if self.scaler_ is not None:
+            self._normalize_input_data()
 
         # set up samples
         for ii in range(self.num_cv_):
@@ -186,16 +215,8 @@ class regData():
                 self.pred_map[tlist[j]] = po
 
         # transform features
-        for ii in range(self.num_cv_):
-            t_init_train, t_follow_train, t_init_test, t_follow_test, num_comp = self._transform_features(
-                self.init_train_x[ii], self.follow_train_x[ii], self.test_x[ii], self.follow_test_x[ii])
-            self.init_train_x[ii] = t_init_train
-            self.follow_train_x[ii] = t_follow_train
-            self.test_x[ii] = t_init_test
-            self.follow_test_x[ii] = t_follow_test
-            self.num_components_list[ii] = num_comp
-
-        print("#components: " + ','.join(map(str, self.num_components_list)))
+        if self.do_transform_:
+            self._transform_input_data()
 
         for s in init_cancer.index:
             self.pred_map[s].cancer_status = 1
@@ -313,7 +334,6 @@ class regData():
         r2_result.loc["logit"] = [r2_val, mean(residuals_logit), median(residuals_logit), num_pos, logit_cutoff]
         r2_val = metrics.r2_score(true_ys_real, test_ys_real)
         r2_result.loc["real"] = [r2_val, mean(residuals_real), median(residuals_real), num_pos, expit(logit_cutoff)]
-        #r2_result = r2_result.round(num_digits)
         return r2_result
 
 

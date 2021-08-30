@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
+import json
 from statistics import median, mean
 from sys import argv
 from typing import final
@@ -34,9 +35,10 @@ def main():
     roc_map = {}
     final_r2 = None
     final_pred = None
+    final_metrics = []
     for cv_idx in range(config_data.total_iterations):
-        cv_seed = config_data.iteration_start_seed + cv_idx
-        r2_result, roc_result, pred_dataframe = run_single_iteration(mcm_data, raw_regions, cv_seed)
+        shuffle_seed = config_data.iteration_start_seed + cv_idx
+        r2_result, roc_result, pred_dataframe, out_metrics = run_single_iteration(mcm_data, raw_regions, config_data, shuffle_seed)
         set_roc(roc_map, roc_result, num_digits=3)
         if cv_idx == 0:
             final_r2 = r2_result
@@ -51,20 +53,24 @@ def main():
                 pred_dataframe.pop(k)
             pred_dataframe.columns = ["pred" + str(cv_idx), "train" + str(cv_idx)]
             final_pred = final_pred.merge(pred_dataframe, how='outer', left_index=True, right_index=True)
+        final_metrics.append(out_metrics)
 
     final_roc = convert_roc_map_to_dataframe(roc_map, num_digits)
     final_roc.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
     final_r2.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
     final_pred = final_pred.round(num_digits)
     final_pred.to_csv(config_data.output_prefix + ".pred.tsv", sep='\t', index=True)
+    outfile = open(config_data.output_prefix + ".metrics.json", 'w')
+    json.dump(final_metrics, outfile)
+    outfile.close()
 
-    check_call("cat " + config_data.output_prefix + ".r2.tsv", shell=True)
-    cmd = "cat " + config_data.output_prefix + ".roc.tsv | awk '$1>=0.95' | head -n 2"
-    check_call(cmd, shell=True)
+    #check_call("cat " + config_data.output_prefix + ".r2.tsv", shell=True)
+    #cmd = "cat " + config_data.output_prefix + ".roc.tsv | awk '$1>=0.95' | head -n 2"
+    #check_call(cmd, shell=True)
 
 
-def run_single_iteration(mcm_data, raw_regions, cv_seed):
-    reg_data = regData()
+def run_single_iteration(mcm_data, raw_regions, config_data, cv_seed):
+    reg_data = regData(config_data)
     reg_data.set_cv_data(mcm_data, raw_regions, cv_seed)
     logging.info("Set %d fold CV data with %d in each partition.", reg_data.num_cv_, reg_data.test_x[0].shape[0])
 
@@ -74,7 +80,7 @@ def run_single_iteration(mcm_data, raw_regions, cv_seed):
     roc_result = reg_data.get_roc()
     r2_result = reg_data.get_r2_stats_dataframe(0.95)
     pred_dataframe = reg_data.get_per_sample_logit_mafs()
-    return r2_result, roc_result, pred_dataframe
+    return r2_result, roc_result, pred_dataframe, reg_data.output_metrics
 
 
 def read_features(feature_path):

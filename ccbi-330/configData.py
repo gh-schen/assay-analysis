@@ -6,12 +6,7 @@ class configData():
         injson = json.load(infile)
         infile.close()
 
-        # file path
-        self.feature_path = injson["feature_path"]
-        self.count_path = injson["count_path"]
-        self.output_prefix = injson["output_prefix"]
+        # member from input json
+        for k, v in injson.items():
+            setattr(self, k, v)
 
-        # parameters
-        self.total_iterations = injson["total_iterations"]
-        self.iteration_start_seed = injson["iteration_start_seed"]
-        
