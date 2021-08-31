@@ -122,6 +122,13 @@ class regData():
                 break
         self.output_metrics["num_components"].append(num_comp)
 
+        """
+        outfile = open("test/pca-components.txt", 'w')
+        init_pca.explained_variance_ratio_.tofile(outfile, sep=" ")
+        outfile.close()
+        exit(0)
+        """
+
         new_pca = decomposition.PCA(n_components=num_comp)
         new_pca.fit(d_pca)
         t_init = new_pca.transform(raw_init)
