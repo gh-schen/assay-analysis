@@ -12,6 +12,9 @@ class regData():
     data struct for running CV regression - use singleRegModel as its core
     """
     def __init__(self, params):
+        # mode
+        self.training_only = False
+        self.test_only = False
         # params
         self.min_maf_ = 1e-06
         self.x_offset_ = 0.1
@@ -46,9 +49,12 @@ class regData():
         self.scaler_ = None
         if params.scaler_str:
             self.scaler_ = eval(params.scaler_str)
+        self.scale_model = None
+        self.pca_model = None
         # model
         self.is_binary_classifier_ = params.binary
         self.regressor_ = eval(params.regressor_str)
+        self.trained_model = None
         # result
         self.pred_map = {}
         self.roc_dataframe = None
@@ -77,6 +83,8 @@ class regData():
             test_locs = list(range(pstart, pstop))
             all_locs = list(range(rawdata.shape[0]))
             train_locs = list(set(all_locs) ^ set(test_locs))
+            if self.num_cv_ == 1:
+                train_locs = test_locs
             x_train = new_x.iloc[train_locs]
             x_test = new_x.iloc[test_locs]
             y_train = new_y.iloc[train_locs]
@@ -110,31 +118,25 @@ class regData():
         """
         For now do PCA on normalized counts
         """
-        d_pca = concatenate((raw_init, raw_follow))
-        init_pca = decomposition.PCA()
-        init_pca.fit(d_pca)
-        total_var = 0
-        num_comp = 0
-        for v in init_pca.explained_variance_ratio_:
-            total_var += v
-            num_comp += 1
-            if total_var >= self.total_explained_variance_:
-                break
-        self.output_metrics["num_components"].append(num_comp)
+        if not self.test_only:
+            d_pca = concatenate((raw_init, raw_follow))
+            init_pca = decomposition.PCA()
+            init_pca.fit(d_pca)
+            total_var = 0
+            num_comp = 0
+            for v in init_pca.explained_variance_ratio_:
+                total_var += v
+                num_comp += 1
+                if total_var >= self.total_explained_variance_:
+                    break
+            self.output_metrics["num_components"].append(num_comp)
+            self.pca_model = decomposition.PCA(n_components=num_comp)
+            self.pca_model.fit(d_pca)
 
-        """
-        outfile = open("test/pca-components.txt", 'w')
-        init_pca.explained_variance_ratio_.tofile(outfile, sep=" ")
-        outfile.close()
-        exit(0)
-        """
-
-        new_pca = decomposition.PCA(n_components=num_comp)
-        new_pca.fit(d_pca)
-        t_init = new_pca.transform(raw_init)
-        t_follow = new_pca.transform(raw_follow)
-        t_test = new_pca.transform(raw_test)
-        t_follow_test = new_pca.transform(raw_follow_test)
+        t_init = self.pca_model.transform(raw_init)
+        t_follow = self.pca_model.transform(raw_follow)
+        t_test = self.pca_model.transform(raw_test)
+        t_follow_test = self.pca_model.transform(raw_follow_test)
         return t_init, t_follow, t_test, t_follow_test
 
 
@@ -169,12 +171,13 @@ class regData():
     def _normalize_input_data(self):
         for ii in range(self.num_cv_):
             d_train = concatenate((self.init_train_x[ii], self.follow_train_x[ii]))
-            scaler = deepcopy(self.scaler_)
-            scaler.fit(d_train)
-            self.init_train_x[ii] = scaler.transform(self.init_train_x[ii])
-            self.follow_train_x[ii] = scaler.transform(self.follow_train_x[ii])
-            self.test_x[ii] = scaler.transform(self.test_x[ii])
-            self.follow_test_x[ii] = scaler.transform(self.follow_test_x[ii])
+            if not self.test_only:
+                self.scale_model = deepcopy(self.scaler_)
+                self.scale_model.fit(d_train)
+                self.init_train_x[ii] = self.scale_model.transform(self.init_train_x[ii])
+                self.follow_train_x[ii] = self.scale_model.transform(self.follow_train_x[ii])
+            self.test_x[ii] = self.scale_model.transform(self.test_x[ii])
+            self.follow_test_x[ii] = self.scale_model.transform(self.follow_test_x[ii])
 
 
     def _transform_input_data(self):
@@ -191,10 +194,15 @@ class regData():
         """
         Prepare CV by partitioning & transforming data
         """
+        if self.training_only or self.test_only: # no CV in training mode
+            self.num_cv_ = 1
+            self.do_clean_up_ = False # temporarily not doing clean up for separate train & test
+
         if self.ctrl_key_ not in count_data.columns:
             raise Exception("Need to have the control key %s" % self.ctrl_key_)
 
         indata = count_data[count_data[self.ctrl_key_] > self.min_total_pos_ctrl_].sort_index()
+
         if self.do_clean_up_:
             indata, regions = self._clean_input_data(indata, input_regions)
             indata = indata.sample(frac=1, random_state=shuffle_seed)
@@ -249,21 +257,30 @@ class regData():
             self.pred_map[dname].cancer_status = cstatus
 
 
+    def _run_binary_training(self, srm, iter_index):
+        x_train = concatenate((self.init_train_x[iter_index], self.follow_train_x[iter_index]))
+        y_train = concatenate((self.init_train_y[iter_index], self.follow_train_labels[iter_index]))
+        srm.train_binary(x_train, y_train)
+
+
     def _run_binary_prediction(self, srm, iter_index):
         x_train = concatenate((self.init_train_x[iter_index], self.follow_train_x[iter_index]))
         y_train = concatenate((self.init_train_y[iter_index], self.follow_train_labels[iter_index]))
-        x_test = concatenate((self.test_x[iter_index], self.follow_test_x[iter_index]))
         srm.train_binary(x_train, y_train)
-
         train_y = srm.predict_prob(x_train)
         tlist = self.init_indexes[iter_index] + self.follow_train_indexes[iter_index]
         for j in range(len(tlist)):
             self.pred_map[tlist[j]].train_ys.append(train_y[j])
 
+        x_test = concatenate((self.test_x[iter_index], self.follow_test_x[iter_index]))
         test_y = srm.predict_prob(x_test)
         tlist = self.test_indexes[iter_index] + self.follow_test_indexes[iter_index]
         for j in range(len(tlist)):
             self.pred_map[tlist[j]].test_y = test_y[j]
+
+
+    def _run_quant_training(self, srm, iter_index):
+        srm.train_quant(self.init_train_x[iter_index], self.follow_train_x[iter_index], self.init_train_y[iter_index], self.follow_iter_)
 
 
     def _run_quant_prediction(self, srm, iter_index):
@@ -302,6 +319,26 @@ class regData():
                 self._run_quant_prediction(srm, ii)
 
 
+    def run_training(self):
+        srm = singleRegModel(self.regressor_)
+        self.trained_model = srm
+        if self.is_binary_classifier_:
+            self._run_binary_training(srm, 0)
+        else:
+            self._run_quant_training(srm, 0)
+
+
+    def run_predict_only(self):
+        x_test = concatenate((self.test_x[0], self.follow_test_x[0]))
+        if self.is_binary_classifier_:
+            test_y = self.trained_model.predict_prob(x_test)
+        else:
+            test_y = self.trained_model.predict_quant(x_test)
+        tlist = self.test_indexes[0] + self.follow_test_indexes[0]
+        for j in range(len(tlist)):
+            self.pred_map[tlist[j]].test_y = test_y[j]
+
+
     def get_roc(self):
         """
         return roc curve
@@ -332,9 +369,14 @@ class regData():
             samples.append(k)
             true_ys.append(v.true_y)
             test_ys.append(v.test_y)
-            train_ys.append(median(v.train_ys))
+            if not self.test_only:
+                train_ys.append(median(v.train_ys))
             states.append(v.cancer_status)
-        pred_dataframe = DataFrame(data={"samples": samples, "true": true_ys, "pred": test_ys, "train": train_ys, "status": states})
+        pred_dataframe = DataFrame(data={"samples": samples, "true": true_ys, "pred": test_ys, "status": states})
+        if self.test_only:
+            pred_dataframe["train"] = [0] * pred_dataframe.shape[0]
+        else:
+            pred_dataframe["train"] = train_ys
         return pred_dataframe
 
 
