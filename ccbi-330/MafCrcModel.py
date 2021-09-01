@@ -384,11 +384,11 @@ class regData():
         if self.roc_dataframe is None:
             raise Exception("Run get_roc first before getting R2!")
 
-        closest_fpr = spec_cutoff
+        closest_fpr = 1 - spec_cutoff
         df = self.roc_dataframe
         # get the roc cutoff at input spec_cutoff
-        df["abs_diff"] = abs(df["fpr"] - closest_fpr)
-        df = df.sort_values("abs_diff")
+        df["abs_diff"] = abs(df["fpr"].astype('float') - closest_fpr)
+        df = df.sort_values(["abs_diff"])
         logit_cutoff = df.iloc[0]["cutoff"]
 
         residuals_logit = []
