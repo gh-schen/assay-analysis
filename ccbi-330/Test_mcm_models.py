@@ -137,16 +137,18 @@ def set_roc(roc_map, reg_roc, num_digits):
         fpr = round(dt["fpr"], num_digits)
         tpr = dt["tpr"]
         if fpr not in roc_map:
-            roc_map[fpr] = []
-        roc_map[fpr].append(tpr)
+            roc_map[fpr] = [[], []]
+        roc_map[fpr][0].append(tpr)
+        roc_map[fpr][1].append(dt["cutoff"])
 
 
 def convert_roc_map_to_dataframe(roc_map, num_digits):
     fpr_sorted = sorted(list(roc_map.keys()), reverse=True)
-    roc_result = DataFrame(data={"specificity": [], "min": [], "max": [], "mean": [], "median": [], "num_points": []})
+    roc_result = DataFrame(data={"specificity": [], "min": [], "max": [], "mean": [], "median": [], "cutoff": [], "num_points": []})
     for fval in fpr_sorted:
-        sensis = roc_map[fval]
-        ds = [1-fval, min(sensis), max(sensis), mean(sensis), median(sensis), len(sensis)]
+        sensis = roc_map[fval][0]
+        cutoffs = roc_map[fval][1]
+        ds = [1-fval, min(sensis), max(sensis), mean(sensis), median(sensis), median(cutoffs), len(sensis)]
         ds[:-1] = [round(x, num_digits) for x in ds[:-1]]
         roc_result.loc[roc_result.shape[0]] = ds
     return roc_result
