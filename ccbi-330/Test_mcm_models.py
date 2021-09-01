@@ -116,9 +116,9 @@ def load_molcounts_data(fname, features, cancer_name):
     region_list = mdata.columns.to_list()
     region_list.remove("ctrl_sum")
     
-    extra_keys = ["max_maf_pct", "somatic_call", "cancer_type", "stage", "sample_id"]
+    extra_keys = ["max_maf_pct", "somatic_call", "cancer_type", "cohort", "stage", "sample_id"]
     mdata = merge(mdata, features[extra_keys], left_index=True, right_on="sample_id")
-    mdata.index = mdata["sample_id"]
+    mdata.index = mdata["sample_id"].to_list()
     
     mdata["max_maf_pct"] = mdata["max_maf_pct"].div(100)
     mdata = mdata.rename(columns = {'max_maf_pct':'maf'})
