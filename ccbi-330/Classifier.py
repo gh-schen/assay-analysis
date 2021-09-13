@@ -261,18 +261,14 @@ class regData():
         x_train = concatenate((self.init_train_x[iter_index], self.follow_train_x[iter_index]))
         y_train = concatenate((self.init_train_y[iter_index], self.follow_train_labels[iter_index]))
         srm.train_binary(x_train, y_train)
-
-
-    def _run_binary_prediction(self, srm, iter_index):
-        x_train = concatenate((self.init_train_x[iter_index], self.follow_train_x[iter_index]))
-        y_train = concatenate((self.init_train_y[iter_index], self.follow_train_labels[iter_index]))
-        srm.train_binary(x_train, y_train)
         train_y = srm.predict_prob(x_train)
         tlist = self.init_indexes[iter_index] + self.follow_train_indexes[iter_index]
         for j in range(len(tlist)):
             self.pred_map[tlist[j]].train_ys.append(train_y[j])
 
-        x_test = concatenate((self.test_x[iter_index], self.follow_test_x[iter_index]))
+
+    def _run_binary_prediction(self, srm, iter_index):
+        self._run_binary_training(srm, iter_index)
         test_y = srm.predict_prob(x_test)
         tlist = self.test_indexes[iter_index] + self.follow_test_indexes[iter_index]
         for j in range(len(tlist)):
@@ -339,7 +335,7 @@ class regData():
             self.pred_map[tlist[j]].test_y = test_y[j]
 
 
-    def get_roc(self):
+    def get_roc(self, rtype="test"):
         """
         return roc curve
         """
@@ -348,7 +344,12 @@ class regData():
         for k,v in self.pred_map.items():
             if v.cancer_status is None:
                 continue
-            test_ys.append(v.test_y)
+            if rtype == "test":
+                test_ys.append(v.test_y)
+            elif rtype == "train":
+                test_ys.append(median(v.train_ys))
+            else:
+                raise Exception("Unable to recognize roc type: %s.", rtype)
             cancer_stats.append(v.cancer_status)
 
         fpr, tpr, threds = metrics.roc_curve(cancer_stats, test_ys, pos_label=1)

@@ -6,7 +6,7 @@ from sys import argv
 from scipy.sparse.construct import rand
 from configData import configData
 from Classifier import regData
-from Run_mcm_models import read_features, load_molcounts_data, set_roc, convert_roc_map_to_dataframe
+from dataInterface import read_features, load_molcounts_data, set_roc, convert_roc_map_to_dataframe
 
 """
 Test two datasets: late-stage only model & late+early, with fixed size
