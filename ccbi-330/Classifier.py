@@ -277,16 +277,19 @@ class regData():
 
     def _run_quant_training(self, srm, iter_index):
         srm.train_quant(self.init_train_x[iter_index], self.follow_train_x[iter_index], self.init_train_y[iter_index], self.follow_iter_)
-
-
-    def _run_quant_prediction(self, srm, iter_index):
-        srm.train_quant(self.init_train_x[iter_index], self.follow_train_x[iter_index], self.init_train_y[iter_index], self.follow_iter_)
-
-        # init training
         train_y = srm.predict_quant(self.init_train_x[iter_index])
         tlist = self.init_indexes[iter_index]
         for j in range(len(tlist)):
             self.pred_map[tlist[j]].train_ys.append(train_y[j])
+        # follow up train
+        train_y = srm.predict_quant(self.follow_train_x[iter_index])
+        tlist = self.follow_train_indexes[iter_index]
+        for j in range(len(tlist)):
+            self.pred_map[tlist[j]].train_ys.append(train_y[j])
+
+
+    def _run_quant_prediction(self, srm, iter_index):
+        self._run_quant_training(srm, iter_index)
 
         # init test
         test_y = srm.predict_quant(self.test_x[iter_index])
@@ -294,12 +297,7 @@ class regData():
         for j in range(len(tlist)):
             self.pred_map[tlist[j]].test_y = test_y[j]
 
-        # follow up train & test
-        train_y = srm.predict_quant(self.follow_train_x[iter_index])
-        tlist = self.follow_train_indexes[iter_index]
-        for j in range(len(tlist)):
-            self.pred_map[tlist[j]].train_ys.append(train_y[j])
-
+        # follow up test
         test_y = srm.predict_quant(self.follow_test_x[iter_index])
         tlist = self.follow_test_indexes[iter_index]
         for j in range(len(tlist)):
