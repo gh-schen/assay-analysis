@@ -43,7 +43,6 @@ def main():
         if cv_idx == 0:
             final_r2 = r2_result
             final_pred = pred_dataframe
-            final_pred.columns = ["samples", "true", "pred0", "train0", "status"]
             final_pred.index = final_pred["samples"]
             final_pred.pop("samples")
         else:

@@ -25,7 +25,7 @@ class regData():
         self.ctrl_key_ = "ctrl_sum"
         self.maf_key_ = "maf"
         #self.intercept_key_ = "intercept"
-        self.min_total_pos_ctrl_ = 500
+        self.min_total_pos_ctrl_ = 1000
         self.follow_iter_ = 1 # number of iterations for training data points with no MAF
         self.total_explained_variance_ = 0.9 # total variance explained
         self.num_components_list = [0] * self.num_cv_ # finally how many components were used
