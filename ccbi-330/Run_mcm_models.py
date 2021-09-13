@@ -8,13 +8,13 @@ from typing import final
 from pandas import read_csv, merge, DataFrame
 from numpy import nan
 from pandas.core.frame import DataFrame
-from MafCrcModel import regData
+from Classifier import regData
 from configData import configData
 
 from subprocess import check_call
 
 """
-Gateway of running simulation/prediction/modeling
+Gateway of running simulation & prediction & modeling
 """
 
 def main():
@@ -23,12 +23,10 @@ def main():
 
     config_path = argv[1]
     config_data = configData(config_path)
-    cancer_type = "crc"
-    num_digits = 4
 
-    features = read_features(config_data.feature_path)
+    features = read_features(config_data.feature_path, config_data.bad_cohorts, config_data.bad_batches)
     logging.info("Read %d samples with features.", features.shape[0])
-    mcm_data, raw_regions = load_molcounts_data(config_data.count_path, features, cancer_type)
+    mcm_data, raw_regions = load_molcounts_data(config_data.count_path, features, config_data.cancer_type)
     logging.info("Loaded %d %s/normal data in %d regions.", mcm_data.shape[0], cancer_type, len(raw_regions))
 
     logging.info("Start CV.")
@@ -39,7 +37,7 @@ def main():
     for cv_idx in range(config_data.total_iterations):
         shuffle_seed = config_data.iteration_start_seed + cv_idx
         r2_result, roc_result, pred_dataframe, out_metrics = run_single_iteration(mcm_data, raw_regions, config_data, shuffle_seed)
-        set_roc(roc_map, roc_result, num_digits=3)
+        set_roc(roc_map, roc_result, num_digits=config_data.num_digits-1)
         if cv_idx == 0:
             final_r2 = r2_result
             final_pred = pred_dataframe
@@ -55,11 +53,11 @@ def main():
             final_pred = final_pred.merge(pred_dataframe, how='outer', left_index=True, right_index=True)
         final_metrics.append(out_metrics)
 
-    final_roc = convert_roc_map_to_dataframe(roc_map, num_digits)
+    final_roc = convert_roc_map_to_dataframe(roc_map, config_data.num_digits)
     final_roc.to_csv(config_data.output_prefix + ".roc.tsv", sep='\t', index=False)
     if not config_data.binary:
         final_r2.to_csv(config_data.output_prefix + ".r2.tsv", sep='\t', index=True)
-    final_pred = final_pred.round(num_digits)
+    final_pred = final_pred.round(config_data.num_digits)
     final_pred.to_csv(config_data.output_prefix + ".pred.tsv", sep='\t', index=True)
     outfile = open(config_data.output_prefix + ".metrics.json", 'w')
     json.dump(final_metrics, outfile)
@@ -88,12 +86,8 @@ def run_single_iteration(mcm_data, raw_regions, config_data, cv_seed):
     return r2_result, roc_result, pred_dataframe, reg_data.output_metrics
 
 
-def read_features(feature_path):
+def read_features(feature_path, bad_cohorts, bad_batches):
     features = read_csv(feature_path, sep='\t', header=0)
-
-    # remove outlier/non=real cohorts & batches
-    bad_cohorts = ["L2AV-F", "L2AV", "MYO"]
-    bad_batches = ["LTO_232"]
 
     # merge cohort names
     raw_names = list(set(features.cohort.to_list()))
