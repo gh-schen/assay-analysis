@@ -19,7 +19,7 @@ def read_features(feature_path, bad_cohorts, bad_batches):
     return features
 
 
-def load_molcounts_data(fname, features, cancer_name):
+def load_molcounts_data(fname, features, cancer_name, maf_key):
     mdata = read_csv(fname, sep='\t', header=0)
     mdata = mdata.T
     mdata.columns = mdata.iloc[0].to_list()
@@ -27,19 +27,20 @@ def load_molcounts_data(fname, features, cancer_name):
     region_list = mdata.columns.to_list()
     region_list.remove("ctrl_sum")
     
-    extra_keys = ["max_maf_pct", "somatic_call", "cancer_type", "cohort", "stage", "sample_id"]
+    extra_keys = [maf_key, "somatic_call", "cancer_type", "cohort", "stage", "sample_id"]
     mdata = merge(mdata, features[extra_keys], left_index=True, right_on="sample_id")
     mdata.index = mdata["sample_id"].to_list()
     
-    mdata["max_maf_pct"] = mdata["max_maf_pct"].div(100)
-    mdata = mdata.rename(columns = {'max_maf_pct':'maf'})
+    mdata[maf_key] = mdata[maf_key].div(100)
+    mdata = mdata.rename(columns = {maf_key: 'maf'})
     
     extra_keys[0] = "maf"
     extra_keys = extra_keys[:-1]
     extra_keys.append("ctrl_sum")
     
-    crc_data =  mdata[mdata.cancer_type.isin([cancer_name, "cancer_free"])][region_list + extra_keys]
-    return crc_data, region_list
+    mdata["cancer_type"] = mdata["cancer_type"].str.lower()
+    tumor_data =  mdata[mdata.cancer_type.isin([cancer_name, "cancer_free"])][region_list + extra_keys]
+    return tumor_data, region_list
 
 
 def set_roc(roc_map, reg_roc, num_digits):
@@ -67,7 +68,7 @@ def convert_roc_map_to_dataframe(roc_map, num_digits):
 
 def dump_prediction_result(output_prefix, final_roc, final_r2, final_pred, final_metrics):
     final_roc.to_csv(output_prefix + ".roc.tsv", sep='\t', index=False)
-    if final_r2:
+    if final_r2 is not None:
         final_r2.to_csv(output_prefix + ".r2.tsv", sep='\t', index=True)
     final_pred.to_csv(output_prefix + ".pred.tsv", sep='\t', index=True)
     outfile = open(output_prefix + ".metrics.json", 'w')

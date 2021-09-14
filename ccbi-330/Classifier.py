@@ -24,6 +24,7 @@ class regData():
         self.label_key_ = "cancer_type"
         self.ctrl_key_ = "ctrl_sum"
         self.maf_key_ = "maf"
+        self.somatic_cleanup = params.somatic_cleanup
         #self.intercept_key_ = "intercept"
         self.min_total_pos_ctrl_ = 1000
         self.follow_iter_ = 1 # number of iterations for training data points with no MAF
@@ -211,8 +212,12 @@ class regData():
             regions = input_regions
 
         # then set training
-        init_cancer_index = (indata[self.label_key_] == self.cancer_type_str_) & (indata["somatic_call"] == 1)
-        init_normal_index = (indata[self.label_key_] == self.cancer_free_str_) & (indata["somatic_call"] == 0)
+        if self.somatic_cleanup:
+            init_cancer_index = (indata[self.label_key_] == self.cancer_type_str_) & (indata["somatic_call"] == 1)
+            init_normal_index = (indata[self.label_key_] == self.cancer_free_str_) & (indata["somatic_call"] == 0)
+        else:
+            init_cancer_index = (indata[self.label_key_] == self.cancer_type_str_) & (~indata[self.maf_key_].isnull())
+            init_normal_index = (indata[self.label_key_] == self.cancer_free_str_)
 
         init_cancer = indata[init_cancer_index]
         init_normal = indata[init_normal_index]
@@ -269,6 +274,8 @@ class regData():
 
     def _run_binary_prediction(self, srm, iter_index):
         self._run_binary_training(srm, iter_index)
+
+        x_test = concatenate((self.test_x[iter_index], self.follow_test_x[iter_index]))
         test_y = srm.predict_prob(x_test)
         tlist = self.test_indexes[iter_index] + self.follow_test_indexes[iter_index]
         for j in range(len(tlist)):

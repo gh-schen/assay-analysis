@@ -26,12 +26,13 @@ def main():
     
     features = read_features(config_data.feature_path, config_data.bad_cohorts, config_data.bad_batches)
     logging.info("Read %d samples with features.", features.shape[0])
-    mcm_data, raw_regions = load_molcounts_data(config_data.count_path, features, config_data.cancer_type)
+    mcm_data, raw_regions = load_molcounts_data(config_data.count_path, features, config_data.cancer_type, config_data.maf_key)
     logging.info("Loaded %d %s/normal data in %d regions.", mcm_data.shape[0], config_data.cancer_type, len(raw_regions))
 
     # manually change some reg_data params, as in building models
     reg_data = regData(config_data)
     reg_data.test_only = True
+
     reg_data.trained_model = pickle_items[0]
     reg_data.scale_model = pickle_items[1]
     reg_data.pca_model = pickle_items[2]
@@ -53,6 +54,7 @@ def main():
     pred_dataframe.pop("samples")
 
     dump_prediction_result(config_data.output_prefix, final_roc, r2_result, pred_dataframe, reg_data.output_metrics)
+    logging.info("Finished prediction at %s", config_data.output_prefix)
 
 
 if __name__ == "__main__":

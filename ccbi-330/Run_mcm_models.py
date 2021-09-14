@@ -23,7 +23,7 @@ def main():
 
     features = read_features(config_data.feature_path, config_data.bad_cohorts, config_data.bad_batches)
     logging.info("Read %d samples with features.", features.shape[0])
-    mcm_data, raw_regions = load_molcounts_data(config_data.count_path, features, config_data.cancer_type)
+    mcm_data, raw_regions = load_molcounts_data(config_data.count_path, features, config_data.cancer_type, config_data.maf_key)
     logging.info("Loaded %d %s/normal data in %d regions.", mcm_data.shape[0], config_data.cancer_type, len(raw_regions))
 
     logging.info("Start CV.")
