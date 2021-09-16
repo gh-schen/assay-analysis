@@ -6,6 +6,8 @@ from sklearn import linear_model, preprocessing, metrics, decomposition
 from scipy.special import logit, expit
 from copy import deepcopy
 
+import logging
+
 
 class regData():
     """
@@ -65,8 +67,10 @@ class regData():
 
     def _set_split_data(self, rawdata, regions, num_partitions, maf_exist):
         pnum = round(rawdata.shape[0] / num_partitions) + 1
-        if pnum == 0:
-            raise Exception("Cannot do %d fold CV with %d length of data." % (num_partitions, rawdata.shape[0]))
+        if rawdata.shape[0] == 0:
+            if self.test_only:
+                return
+            raise Exception("Empty input data in classifier.")
 
         new_x = (rawdata[regions] + self.x_offset_).div(rawdata[self.ctrl_key_].values, axis=0)
         new_x = log(new_x.astype('float'))
@@ -120,7 +124,10 @@ class regData():
         For now do PCA on normalized counts
         """
         if not self.test_only:
-            d_pca = concatenate((raw_init, raw_follow))
+            if raw_follow is not None:
+                d_pca = concatenate((raw_init, raw_follow))
+            else:
+                d_pca = raw_init
             init_pca = decomposition.PCA()
             init_pca.fit(d_pca)
             total_var = 0
@@ -135,9 +142,13 @@ class regData():
             self.pca_model.fit(d_pca)
 
         t_init = self.pca_model.transform(raw_init)
-        t_follow = self.pca_model.transform(raw_follow)
         t_test = self.pca_model.transform(raw_test)
-        t_follow_test = self.pca_model.transform(raw_follow_test)
+        if raw_follow is not None:
+            t_follow = self.pca_model.transform(raw_follow)
+            t_follow_test = self.pca_model.transform(raw_follow_test)
+        else:
+            t_follow = None
+            t_follow_test = None
         return t_init, t_follow, t_test, t_follow_test
 
 
@@ -171,24 +182,34 @@ class regData():
 
     def _normalize_input_data(self):
         for ii in range(self.num_cv_):
-            d_train = concatenate((self.init_train_x[ii], self.follow_train_x[ii]))
+            if len(self.follow_train_x) > ii:
+                d_train = concatenate((self.init_train_x[ii], self.follow_train_x[ii]))
+            else:
+                d_train = self.init_train_x[ii]
             if not self.test_only:
                 self.scale_model = deepcopy(self.scaler_)
                 self.scale_model.fit(d_train)
                 self.init_train_x[ii] = self.scale_model.transform(self.init_train_x[ii])
-                self.follow_train_x[ii] = self.scale_model.transform(self.follow_train_x[ii])
+                if len(self.follow_train_x) > ii:
+                    self.follow_train_x[ii] = self.scale_model.transform(self.follow_train_x[ii])
             self.test_x[ii] = self.scale_model.transform(self.test_x[ii])
-            self.follow_test_x[ii] = self.scale_model.transform(self.follow_test_x[ii])
+            if len(self.follow_train_x) > ii:
+                self.follow_test_x[ii] = self.scale_model.transform(self.follow_test_x[ii])
 
 
     def _transform_input_data(self):
         for ii in range(self.num_cv_):
-            t_init_train, t_follow_train, t_init_test, t_follow_test = self._transform_features(
-                self.init_train_x[ii], self.follow_train_x[ii], self.test_x[ii], self.follow_test_x[ii])
+            if ii < len(self.follow_train_x):
+                t_init_train, t_follow_train, t_init_test, t_follow_test = self._transform_features(
+                    self.init_train_x[ii], self.follow_train_x[ii], self.test_x[ii], self.follow_test_x[ii])
+            else:
+                t_init_train, t_follow_train, t_init_test, t_follow_test = self._transform_features(
+                    self.init_train_x[ii], None, self.test_x[ii], None)
             self.init_train_x[ii] = t_init_train
-            self.follow_train_x[ii] = t_follow_train
             self.test_x[ii] = t_init_test
-            self.follow_test_x[ii] = t_follow_test
+            if ii < len(self.follow_train_x):
+                self.follow_train_x[ii] = t_follow_train
+                self.follow_test_x[ii] = t_follow_test
 
 
     def set_cv_data(self, count_data, input_regions, shuffle_seed):
@@ -225,7 +246,10 @@ class regData():
 
         self._set_split_data(init_cancer, regions, self.num_cv_, maf_exist=True)
         self._set_split_data(init_normal, regions, self.num_cv_, maf_exist=True)
-        self._set_split_data(follows, regions, self.num_cv_, maf_exist=False)
+        if follows.shape[0] > 0:
+            self._set_split_data(follows, regions, self.num_cv_, maf_exist=False)
+        else:
+            logging.warning("All cancer samples have MAF - this is unusual.")
 
         if self.scaler_ is not None:
             self._normalize_input_data()
@@ -237,11 +261,12 @@ class regData():
                 po = predOutcome()
                 po.true_y = self.test_y[ii][j]
                 self.pred_map[tlist[j]] = po
-            tlist = self.follow_test_indexes[ii]
-            for j in range(len(tlist)):
-                po = predOutcome()
-                po.true_y = None
-                self.pred_map[tlist[j]] = po
+            if ii < len(self.follow_test_indexes):
+                tlist = self.follow_test_indexes[ii]
+                for j in range(len(tlist)):
+                    po = predOutcome()
+                    po.true_y = None
+                    self.pred_map[tlist[j]] = po
 
         # transform features
         if self.do_transform_:
@@ -263,11 +288,18 @@ class regData():
 
 
     def _run_binary_training(self, srm, iter_index):
-        x_train = concatenate((self.init_train_x[iter_index], self.follow_train_x[iter_index]))
-        y_train = concatenate((self.init_train_y[iter_index], self.follow_train_labels[iter_index]))
+        if len(self.follow_train_x) > 0:
+            x_train = concatenate((self.init_train_x[iter_index], self.follow_train_x[iter_index]))
+            y_train = concatenate((self.init_train_y[iter_index], self.follow_train_labels[iter_index]))
+        else:
+            x_train = self.init_train_x[iter_index]
+            y_train = self.init_train_y[iter_index]
         srm.train_binary(x_train, y_train)
         train_y = srm.predict_prob(x_train)
-        tlist = self.init_indexes[iter_index] + self.follow_train_indexes[iter_index]
+        if len(self.follow_train_x) > 0:
+            tlist = self.init_indexes[iter_index] + self.follow_train_indexes[iter_index]
+        else:
+            tlist = self.init_indexes[iter_index]
         for j in range(len(tlist)):
             self.pred_map[tlist[j]].train_ys.append(train_y[j])
 
@@ -275,24 +307,33 @@ class regData():
     def _run_binary_prediction(self, srm, iter_index):
         self._run_binary_training(srm, iter_index)
 
-        x_test = concatenate((self.test_x[iter_index], self.follow_test_x[iter_index]))
+        if len(self.follow_test_x) > 0:
+            x_test = concatenate((self.test_x[iter_index], self.follow_test_x[iter_index]))
+            tlist = self.test_indexes[iter_index] + self.follow_test_indexes[iter_index]
+        else:
+            x_test = self.test_x[iter_index]
+            tlist = self.test_indexes[iter_index]
         test_y = srm.predict_prob(x_test)
-        tlist = self.test_indexes[iter_index] + self.follow_test_indexes[iter_index]
         for j in range(len(tlist)):
             self.pred_map[tlist[j]].test_y = test_y[j]
 
 
     def _run_quant_training(self, srm, iter_index):
-        srm.train_quant(self.init_train_x[iter_index], self.follow_train_x[iter_index], self.init_train_y[iter_index], self.follow_iter_)
+        if len(self.follow_train_x) > 0:
+            f_train = self.follow_train_x[iter_index]
+        else:
+            f_train = None
+        srm.train_quant(self.init_train_x[iter_index], f_train, self.init_train_y[iter_index], self.follow_iter_)
         train_y = srm.predict_quant(self.init_train_x[iter_index])
         tlist = self.init_indexes[iter_index]
         for j in range(len(tlist)):
             self.pred_map[tlist[j]].train_ys.append(train_y[j])
         # follow up train
-        train_y = srm.predict_quant(self.follow_train_x[iter_index])
-        tlist = self.follow_train_indexes[iter_index]
-        for j in range(len(tlist)):
-            self.pred_map[tlist[j]].train_ys.append(train_y[j])
+        if len(self.follow_train_x) > 0:
+            train_y = srm.predict_quant(self.follow_train_x[iter_index])
+            tlist = self.follow_train_indexes[iter_index]
+            for j in range(len(tlist)):
+                self.pred_map[tlist[j]].train_ys.append(train_y[j])
 
 
     def _run_quant_prediction(self, srm, iter_index):
@@ -305,10 +346,11 @@ class regData():
             self.pred_map[tlist[j]].test_y = test_y[j]
 
         # follow up test
-        test_y = srm.predict_quant(self.follow_test_x[iter_index])
-        tlist = self.follow_test_indexes[iter_index]
-        for j in range(len(tlist)):
-            self.pred_map[tlist[j]].test_y = test_y[j]
+        if len(self.follow_test_indexes) > 0:
+            test_y = srm.predict_quant(self.follow_test_x[iter_index])
+            tlist = self.follow_test_indexes[iter_index]
+            for j in range(len(tlist)):
+                self.pred_map[tlist[j]].test_y = test_y[j]
 
 
     def run_cv_maf_predict(self):
@@ -330,12 +372,16 @@ class regData():
 
 
     def run_predict_only(self):
-        x_test = concatenate((self.test_x[0], self.follow_test_x[0]))
+        if self.follow_test_x:
+            x_test = concatenate((self.test_x[0], self.follow_test_x[0]))
+            tlist = self.test_indexes[0] + self.follow_test_indexes[0]
+        else:
+            x_test = self.test_x[0]
+            tlist = self.test_indexes[0]
         if self.is_binary_classifier_:
             test_y = self.trained_model.predict_prob(x_test)
         else:
             test_y = self.trained_model.predict_quant(x_test)
-        tlist = self.test_indexes[0] + self.follow_test_indexes[0]
         for j in range(len(tlist)):
             self.pred_map[tlist[j]].test_y = test_y[j]
 

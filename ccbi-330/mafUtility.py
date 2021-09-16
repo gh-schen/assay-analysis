@@ -4,6 +4,7 @@ from scipy.special import logit
 from scipy import stats
 from copy import deepcopy
 from numpy import random, concatenate, quantile, matmul, transpose
+import logging
 
 
 class singleRegModel():
@@ -24,6 +25,10 @@ class singleRegModel():
 
     def train_quant(self, init_x, follow_x, init_y, follow_iter):
         self.train_binary(init_x, init_y)
+        if follow_x is None:
+            logging.warning("No samples have missing MAF - no follow up training")
+            return
+
         for i in range(follow_iter):
             init_preds = self.mmodel.predict(init_x)
             upper_limit = quantile(init_preds, self.quantile_limit_)
